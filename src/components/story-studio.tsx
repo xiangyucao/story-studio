@@ -1,9 +1,10 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 import {
   BookOpen, Bot, BrainCircuit, Check, ChevronRight, CirclePlus, Clock3,
-  FileText, GitBranch, History, LoaderCircle, Network, Save, Search,
-  Settings, Sparkles, Users, WandSparkles, X,
+  Download, FileText, FileType2, GitBranch, History, ImagePlus, LoaderCircle,
+  Network, Printer, Save, Search, Settings, Sparkles, Users, WandSparkles, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Chapter, Character, ModelSettings, Project, Workspace } from "@/lib/types";
@@ -47,6 +48,9 @@ export function StoryStudio() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [newProjectTitle, setNewProjectTitle] = useState("");
   const [settings, setSettings] = useState<ModelSettings>(() => {
     if (typeof window === "undefined") return defaultSettings;
     const saved = localStorage.getItem("story-studio-model-settings");
@@ -165,6 +169,42 @@ export function StoryStudio() {
     }
   };
 
+  const createNewProject = async () => {
+    const title = newProjectTitle.trim();
+    if (!title) return;
+    const newId = await mutate("create-project", { title }, false);
+    if (newId) {
+      setSelectedChapterId("");
+      setSelectedCharacterId("");
+      await loadWorkspace(newId);
+      setActiveTab("write");
+      setMessage(`已创建《${title}》`);
+      setNewProjectOpen(false);
+      setNewProjectTitle("");
+    }
+  };
+
+  const uploadIllustration = async (file: File) => {
+    if (!workspace || !chapterDraft) return;
+    const form = new FormData();
+    form.set("file", file);
+    form.set("projectId", workspace.project.id);
+    form.set("chapterId", chapterDraft.id);
+    form.set("caption", file.name.replace(/\.[^.]+$/, ""));
+    setBusy(true);
+    try {
+      const response = await fetch("/api/illustrations", { method: "POST", body: form });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "上传失败");
+      await loadWorkspace(workspace.project.id);
+      setMessage("插画已加入当前章节");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "上传失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const wordCount = useMemo(() => chapterDraft?.content.replace(/\s/g, "").length ?? 0, [chapterDraft?.content]);
 
   if (!workspace) {
@@ -177,13 +217,14 @@ export function StoryStudio() {
         <div className="brand"><div className="brand-mark"><WandSparkles size={20} /></div><div><strong>Story Studio</strong><span>长篇创作工作台</span></div></div>
         <div className="project-switcher">
           <span className="eyebrow">当前作品</span>
-          <select value={workspace.project.id} onChange={(event) => void loadWorkspace(event.target.value)}>
+          <div className="project-select-row"><select value={workspace.project.id} onChange={(event) => void loadWorkspace(event.target.value)}>
             {workspace.projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
-          </select>
+          </select><button className="tiny-button" title="新建作品" onClick={() => { setNewProjectTitle(""); setNewProjectOpen(true); }}><CirclePlus size={16} /></button></div>
         </div>
         <div className="top-actions">
           {message && <span className="status-message">{message}</span>}
           {busy && <LoaderCircle size={17} className="spin muted" />}
+          <button className="secondary-button" onClick={() => setExportOpen(true)}><Download size={17} />导出</button>
           <button className="icon-button" title="模型设置" onClick={() => setSettingsOpen(true)}><Settings size={19} /></button>
         </div>
       </header>
@@ -212,6 +253,7 @@ export function StoryStudio() {
                 <div><span>{wordCount.toLocaleString()} 字</span><button className="primary-button small" onClick={() => void saveChapter()}><Save size={16} />保存</button></div>
               </div>
               <textarea className="manuscript-editor" value={chapterDraft.content} placeholder="从这里开始写故事……" onChange={(e) => setChapterDraft({ ...chapterDraft, content: e.target.value })} />
+              <div className="illustration-strip"><div className="illustration-heading"><span><ImagePlus size={15} />章节插画</span><label className="upload-button"><CirclePlus size={15} />添加图片<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadIllustration(file); event.target.value = ""; }} /></label></div>{workspace.illustrations.filter((image) => image.chapterId === chapterDraft.id).length > 0 && <div className="illustration-grid">{workspace.illustrations.filter((image) => image.chapterId === chapterDraft.id).map((image) => <figure key={image.id}><img src={`/api/assets/${image.id}`} alt={image.caption || image.fileName} /><figcaption>{image.caption || image.fileName}</figcaption></figure>)}</div>}</div>
               <div className="summary-row"><label>章节摘要</label><input value={chapterDraft.summary} onChange={(e) => setChapterDraft({ ...chapterDraft, summary: e.target.value })} placeholder="这一章发生了什么？" /></div>
             </article>
 
@@ -274,6 +316,8 @@ export function StoryStudio() {
       </section>
 
       {settingsOpen && <div className="modal-backdrop" onMouseDown={() => setSettingsOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">MODEL PROVIDER</span><h2>模型设置</h2></div><button className="icon-button" onClick={() => setSettingsOpen(false)}><X size={19} /></button></div><Field label="提供方" value={settings.provider} options={[{ label: "OpenAI Responses API", value: "openai" }, { label: "本地 / OpenAI-compatible", value: "openai-compatible" }]} onChange={(provider) => setSettings({ ...settings, provider: provider as ModelSettings["provider"] })} /><Field label="模型名称" value={settings.model} onChange={(model) => setSettings({ ...settings, model })} />{settings.provider === "openai-compatible" && <Field label="Base URL" value={settings.baseUrl || ""} onChange={(baseUrl) => setSettings({ ...settings, baseUrl })} />}<div className="security-note">API Key 不会存入浏览器。OpenAI 使用服务器端 <code>OPENAI_API_KEY</code>；本地模型默认无需密钥。</div><button className="primary-button full" onClick={() => { localStorage.setItem("story-studio-model-settings", JSON.stringify(settings)); setSettingsOpen(false); setMessage("模型设置已保存在本机浏览器"); }}><Save size={17} />保存设置</button></section></div>}
+      {exportOpen && <div className="modal-backdrop" onMouseDown={() => setExportOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">EXPORT</span><h2>导出《{workspace.project.title}》</h2></div><button className="icon-button" onClick={() => setExportOpen(false)}><X size={19} /></button></div><div className="export-options"><button onClick={() => { window.open(`/export/${workspace.project.id}`, "_blank", "noopener,noreferrer"); setExportOpen(false); }}><span className="export-icon"><Printer size={22} /></span><div><strong>PDF / 打印稿</strong><small>A4 专业排版，包含章节插画；在打印窗口选择“另存为 PDF”。</small></div><ChevronRight size={17} /></button><a href={`/api/export/markdown?projectId=${workspace.project.id}`} onClick={() => setExportOpen(false)}><span className="export-icon"><FileType2 size={22} /></span><div><strong>Markdown 原稿</strong><small>适合备份、版本管理以及导入其他写作工具。</small></div><ChevronRight size={17} /></a></div><div className="security-note">PDF 使用浏览器原生打印引擎，中文字体与插画会按当前电脑的实际效果排版。</div></section></div>}
+      {newProjectOpen && <div className="modal-backdrop" onMouseDown={() => setNewProjectOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">NEW PROJECT</span><h2>新建作品</h2></div><button className="icon-button" aria-label="关闭新建作品" onClick={() => setNewProjectOpen(false)}><X size={19} /></button></div><label className="field"><span>作品名称</span><input autoFocus value={newProjectTitle} onChange={(event) => setNewProjectTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newProjectTitle.trim()) void createNewProject(); }} placeholder="例如：雾港来信" /></label><p className="modal-help">新作品会自动建立“第一章”，并与现有作品的数据完全分开。</p><button className="primary-button full" disabled={!newProjectTitle.trim() || busy} onClick={() => void createNewProject()}><CirclePlus size={17} />创建作品</button></section></div>}
     </main>
   );
 }

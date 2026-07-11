@@ -87,6 +87,17 @@ export type Revision = {
   createdAt: string;
 };
 
+export type Illustration = {
+  id: string;
+  projectId: string;
+  chapterId: string;
+  fileName: string;
+  mimeType: string;
+  caption: string;
+  position: number;
+  createdAt: string;
+};
+
 export type Workspace = {
   projects: Project[];
   project: Project;
@@ -96,6 +107,7 @@ export type Workspace = {
   relationships: Relationship[];
   worldEntries: WorldEntry[];
   events: StoryEvent[];
+  illustrations: Illustration[];
   revisions: Revision[];
 };
 

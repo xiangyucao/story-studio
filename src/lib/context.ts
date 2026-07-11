@@ -15,6 +15,7 @@ export function buildStoryContext(workspace: Workspace, chapterId?: string) {
     `\n人物关系：\n${workspace.relationships.map((r) => `- ${r.sourceName} → ${r.targetName}：${r.type}。${r.description}`).join("\n")}`,
     `\n硬设定：\n${workspace.worldEntries.filter((w) => w.isCanon).map((w) => `- [${w.category}] ${w.name}：${w.description}`).join("\n")}`,
     `\n事件链：\n${workspace.events.map((e) => `- ${e.storyTime} ${e.title}；原因：${e.causes}；结果：${e.consequences}`).join("\n")}`,
+    `\n插画说明：\n${workspace.illustrations.map((image) => `- ${workspace.chapters.find((chapter) => chapter.id === image.chapterId)?.title || "章节"}：${image.caption || image.fileName}`).join("\n")}`,
     `\n相关章节：\n${nearby.map((c) => `### ${c.title}\n摘要：${c.summary}\n${c.content.slice(-5000)}`).join("\n\n")}`,
   ].join("\n");
 }

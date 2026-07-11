@@ -17,6 +17,7 @@ const workspace: Workspace = {
     { id: "w2", projectId: "p", category: "草案", name: "废弃设定", description: "不应进入提示", isCanon: false },
   ],
   events: [{ id: "e", projectId: "p", chapterId: "c2", chapterTitle: "第二章", title: "取得钥匙", storyTime: "第二天", description: "获得钥匙", causes: "受人委托", consequences: "可以进入仓库" }],
+  illustrations: [],
   revisions: [],
 };
 

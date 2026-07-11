@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import type {
   Chapter,
   Character,
+  Illustration,
   OutlineNode,
   Project,
   Relationship,
@@ -108,6 +109,17 @@ db.exec(`
     instruction TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS illustrations (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    chapter_id TEXT NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+    file_name TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    caption TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
   CREATE INDEX IF NOT EXISTS idx_chapters_project ON chapters(project_id, position);
   CREATE INDEX IF NOT EXISTS idx_outline_project ON outline_nodes(project_id, position);
   CREATE INDEX IF NOT EXISTS idx_events_project ON story_events(project_id);
@@ -199,18 +211,40 @@ export function getWorkspace(projectId?: string): Workspace {
       chapterTitle: r.chapter_title ? String(r.chapter_title) : null, title: String(r.title), storyTime: String(r.story_time),
       description: String(r.description), causes: String(r.causes), consequences: String(r.consequences),
     }));
+  const illustrations = (db.prepare("SELECT * FROM illustrations WHERE project_id = ? ORDER BY chapter_id, position, created_at").all(project.id) as Row[]).map((r): Illustration => ({
+    id: String(r.id), projectId: String(r.project_id), chapterId: String(r.chapter_id), fileName: String(r.file_name),
+    mimeType: String(r.mime_type), caption: String(r.caption), position: Number(r.position), createdAt: String(r.created_at),
+  }));
   const revisions = (db.prepare("SELECT * FROM revisions WHERE project_id = ? ORDER BY created_at DESC LIMIT 30").all(project.id) as Row[]).map((r): Revision => ({
     id: String(r.id), entityType: String(r.entity_type), entityId: String(r.entity_id), beforeContent: String(r.before_content),
     afterContent: String(r.after_content), instruction: String(r.instruction), createdAt: String(r.created_at),
   }));
-  return { projects, project, outline, chapters, characters, relationships, worldEntries, events, revisions };
+  return { projects, project, outline, chapters, characters, relationships, worldEntries, events, illustrations, revisions };
 }
 
 export function createProject(title: string) {
   const projectId = id();
   const timestamp = now();
-  db.prepare("INSERT INTO projects VALUES (?, ?, '', '', '', ?, ?)").run(projectId, title || "未命名作品", timestamp, timestamp);
+  db.transaction(() => {
+    db.prepare("INSERT INTO projects VALUES (?, ?, '', '', '', ?, ?)").run(projectId, title || "未命名作品", timestamp, timestamp);
+    const outlineId = id();
+    db.prepare("INSERT INTO outline_nodes VALUES (?, ?, NULL, 'chapter', '第一章', '', 0, 'planned')").run(outlineId, projectId);
+    db.prepare("INSERT INTO chapters VALUES (?, ?, ?, '第一章', '', '', 'draft', 0, 0, ?)").run(id(), projectId, outlineId, timestamp);
+  })();
   return projectId;
+}
+
+export function createIllustration(input: { projectId: string; chapterId: string; fileName: string; storedName: string; mimeType: string; caption: string }) {
+  const illustrationId = id();
+  const max = db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM illustrations WHERE chapter_id=?").get(input.chapterId) as { p: number };
+  db.prepare("INSERT INTO illustrations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+    illustrationId, input.projectId, input.chapterId, input.fileName, input.storedName, input.mimeType, input.caption, max.p + 1, now(),
+  );
+  return illustrationId;
+}
+
+export function getIllustrationAsset(illustrationId: string) {
+  return db.prepare("SELECT stored_name, file_name, mime_type FROM illustrations WHERE id=?").get(illustrationId) as { stored_name: string; file_name: string; mime_type: string } | undefined;
 }
 
 export function mutateWorkspace(action: string, payload: Record<string, unknown>) {
@@ -290,4 +324,4 @@ export function searchLogic(projectId: string, query: string) {
   return { eventHits, characterHits, worldHits };
 }
 
-export { dbPath };
+export { dataDir, dbPath };

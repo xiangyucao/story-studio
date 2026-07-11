@@ -38,6 +38,8 @@ dev.stderr.log
 
 # local story data
 /data/
+/tmp/
+/output/
 
 # vercel
 .vercel
