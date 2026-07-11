@@ -328,6 +328,14 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
       db.prepare("INSERT INTO world_entries VALUES (?, ?, ?, ?, ?, ?)").run(entryId, payload.projectId, payload.category || "背景", payload.name || "新设定", payload.description || "", payload.isCanon === false ? 0 : 1);
       return entryId;
     }
+    case "save-world":
+      db.prepare("UPDATE world_entries SET category=?, name=?, description=?, is_canon=? WHERE id=?").run(
+        payload.category || "背景", payload.name || "未命名设定", payload.description || "", payload.isCanon === false ? 0 : 1, payload.id,
+      );
+      return payload.id;
+    case "delete-world":
+      db.prepare("DELETE FROM world_entries WHERE id=?").run(payload.id);
+      return payload.id;
     case "create-event": {
       const eventId = id();
       db.prepare("INSERT INTO story_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(eventId, payload.projectId, payload.chapterId || null, payload.title || "新事件", payload.storyTime || "", payload.description || "", payload.causes || "", payload.consequences || "");

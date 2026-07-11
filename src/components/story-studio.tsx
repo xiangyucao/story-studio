@@ -7,7 +7,7 @@ import {
   Network, Printer, Save, Search, Settings, Sparkles, Users, WandSparkles, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Chapter, Character, ModelSettings, Project, Workspace } from "@/lib/types";
+import type { Chapter, Character, ModelSettings, Project, Workspace, WorldEntry } from "@/lib/types";
 
 type Tab = "write" | "outline" | "characters" | "world" | "logic" | "history";
 type AiAction = "outline" | "outline-volume" | "outline-node" | "expand" | "revise" | "logic";
@@ -52,9 +52,11 @@ export function StoryStudio() {
   const [selectedChapterId, setSelectedChapterId] = useState("");
   const [selectedCharacterId, setSelectedCharacterId] = useState("");
   const [selectedOutlineId, setSelectedOutlineId] = useState("");
+  const [selectedWorldId, setSelectedWorldId] = useState("");
   const [chapterDraft, setChapterDraft] = useState<Chapter | null>(null);
   const [characterDraft, setCharacterDraft] = useState<Character | null>(null);
   const [outlineDraft, setOutlineDraft] = useState<Workspace["outline"][number] | null>(null);
+  const [worldDraft, setWorldDraft] = useState<WorldEntry | null>(null);
   const [projectDraft, setProjectDraft] = useState<Project | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -90,18 +92,21 @@ export function StoryStudio() {
       const chapter = data.chapters.find((item) => item.id === selectedChapterId) ?? data.chapters[0] ?? null;
       const character = data.characters.find((item) => item.id === selectedCharacterId) ?? data.characters[0] ?? null;
       const outlineNode = data.outline.find((item) => item.id === (preferredOutlineId || selectedOutlineId)) ?? data.outline[0] ?? null;
+      const worldEntry = data.worldEntries.find((item) => item.id === selectedWorldId) ?? data.worldEntries[0] ?? null;
       setSelectedChapterId(chapter?.id || "");
       setChapterDraft(chapter);
       setSelectedCharacterId(character?.id || "");
       setCharacterDraft(character);
       setSelectedOutlineId(outlineNode?.id || "");
       setOutlineDraft(outlineNode ? { ...outlineNode } : null);
+      setSelectedWorldId(worldEntry?.id || "");
+      setWorldDraft(worldEntry ? { ...worldEntry } : null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "加载失败");
     } finally {
       setBusy(false);
     }
-  }, [selectedChapterId, selectedCharacterId, selectedOutlineId]);
+  }, [selectedChapterId, selectedCharacterId, selectedOutlineId, selectedWorldId]);
 
   useEffect(() => {
     // 首次挂载后从本地 API 载入持久化工作区。
@@ -415,7 +420,7 @@ export function StoryStudio() {
 
         {activeTab === "world" && (
           <ContentPage eyebrow="WORLD BIBLE" title="世界观与背景" description="标为硬设定的内容会进入每次相关 AI 请求。" action={<button className="primary-button" onClick={async () => { const name = window.prompt("设定名称"); if (name) { const category = window.prompt("分类", "背景") || "背景"; const description = window.prompt("设定说明", "") || ""; await mutate("create-world", { projectId: workspace.project.id, name, category, description, isCanon: true }); } }}><CirclePlus size={17} />添加设定</button>}>
-            <div className="world-grid">{workspace.worldEntries.map((entry) => <article key={entry.id} className="world-card"><div><span className="category-tag">{entry.category}</span>{entry.isCanon && <span className="canon-tag"><Check size={12} />硬设定</span>}</div><h3>{entry.name}</h3><p>{entry.description}</p></article>)}</div>
+            <div className="world-layout"><div className="world-grid">{workspace.worldEntries.map((entry) => <button key={entry.id} className={entry.id === selectedWorldId ? "world-card selected" : "world-card"} onClick={() => { setSelectedWorldId(entry.id); setWorldDraft({ ...entry }); }}><div><span className="category-tag">{entry.category}</span>{entry.isCanon ? <span className="canon-tag"><Check size={12} />硬设定</span> : <span className="draft-tag">草稿</span>}</div><h3>{entry.name}</h3><p>{entry.description}</p></button>)}</div>{worldDraft && <div className="detail-editor world-editor"><div className="section-heading"><div><span className="eyebrow">WORLD ENTRY</span><h2>修改设定</h2></div><button className="primary-button small" disabled={!worldDraft.name.trim()} onClick={async () => { await mutate("save-world", worldDraft as unknown as Record<string, unknown>); setMessage(worldDraft.isCanon ? "硬设定已保存，后续 AI 请求会使用最新内容" : "设定草稿已保存，不会发送给 AI"); }}><Save size={15} />保存</button></div><Field label="设定名称" value={worldDraft.name} onChange={(name) => setWorldDraft({ ...worldDraft, name })} /><Field label="分类" value={worldDraft.category} onChange={(category) => setWorldDraft({ ...worldDraft, category })} /><Field label="详细说明" value={worldDraft.description} multiline onChange={(description) => setWorldDraft({ ...worldDraft, description })} /><Field label="AI 使用方式" value={worldDraft.isCanon ? "canon" : "draft"} options={[{ label: "硬设定（发送给 AI）", value: "canon" }, { label: "草稿（暂不发送）", value: "draft" }]} onChange={(value) => setWorldDraft({ ...worldDraft, isCanon: value === "canon" })} /><div className="world-editor-note">只有“硬设定”会自动进入写作、续写、改写和大纲生成的上下文。</div><button className="danger-text-button world-delete" onClick={async () => { if (!window.confirm(`确认删除设定“${worldDraft.name}”？`)) return; await mutate("delete-world", { id: worldDraft.id }); setMessage("世界观设定已删除"); }}>删除这条设定</button></div>}</div>
             <div className="subsection-heading"><h2 className="subsection-title">事件时间线</h2><button className="tiny-button" title="添加事件" onClick={async () => { const title = window.prompt("事件名称"); if (title) { const storyTime = window.prompt("故事内时间", "") || ""; const description = window.prompt("事件经过", "") || ""; const causes = window.prompt("前置原因", "") || ""; const consequences = window.prompt("直接结果", "") || ""; await mutate("create-event", { projectId: workspace.project.id, title, storyTime, description, causes, consequences }); } }}><CirclePlus size={16} /></button></div><div className="timeline">{workspace.events.map((event) => <article key={event.id} className="timeline-event"><div className="timeline-dot" /><span>{event.storyTime || "时间待定"}</span><h3>{event.title}</h3><p>{event.description}</p><div className="cause-effect"><span><b>原因</b>{event.causes}</span><ChevronRight size={18} /><span><b>结果</b>{event.consequences}</span></div></article>)}</div>
           </ContentPage>
         )}
