@@ -136,6 +136,8 @@ button { cursor: pointer; }
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 25px; margin-bottom: 30px; }
 .page-header h1 { margin: 6px 0 5px; font-family: Georgia, "Noto Serif SC", serif; font-size: 34px; }
 .page-header p { margin: 0; color: var(--muted); font-size: 13px; }
+.page-actions { display: flex; align-items: center; gap: 8px; }
+.visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 .outline-grid, .character-layout, .world-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 22px; }
 .project-foundation { margin-bottom: 22px; padding: 22px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
 .foundation-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
@@ -195,6 +197,18 @@ button { cursor: pointer; }
 .relationship-row > span { display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--accent); font-size: 10px; }
 .relationship-row i { width: 26px; height: 1px; background: #cbbfb2; }
 .relationship-row p { margin: 0; color: var(--muted); font-size: 10px; }
+.import-summary { display: flex; gap: 10px; margin: 14px 0; }
+.import-summary span { flex: 1; padding: 12px; color: var(--muted); background: #f6f2ec; border-radius: 8px; font-size: 11px; text-align: center; }
+.import-summary strong { display: block; margin-bottom: 2px; color: var(--ink); font-family: Georgia, "Noto Serif SC", serif; font-size: 20px; }
+.import-preview-list { display: grid; gap: 7px; max-height: 340px; margin-bottom: 16px; overflow-y: auto; }
+.import-preview-row { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 9px; align-items: start; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.import-preview-row div { min-width: 0; }
+.import-preview-row strong, .import-preview-row small { display: block; }
+.import-preview-row strong { font-size: 12px; }
+.import-preview-row small { margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.import-status { padding: 4px 5px; color: #fff; background: var(--sage); border-radius: 9px; font-size: 9px; text-align: center; }
+.import-status.update { color: #8d4c3d; background: #f5ddd6; }
+.import-status.relation { color: #655d91; background: #e9e6f5; }
 
 .world-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .world-card { min-height: 160px; padding: 20px; background: var(--paper); border: 1px solid var(--line); border-radius: 11px; }

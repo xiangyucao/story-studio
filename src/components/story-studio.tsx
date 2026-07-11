@@ -5,14 +5,17 @@ import {
   AlertTriangle, BookOpen, Bot, BrainCircuit, Check, ChevronDown, ChevronRight, CirclePlus, Clock3,
   Download, FileText, FileType2, GitBranch, History, ImagePlus, LoaderCircle,
   Network, Printer, Save, Search, Settings, Sparkles, Users, WandSparkles, X,
+  Upload,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Chapter, Character, ModelSettings, Project, StoryEvent, Workspace, WorldEntry } from "@/lib/types";
+import { normalizeCharacterName, parseCharacterImportJson, type CharacterImportData } from "@/lib/character-import";
 
 type Tab = "write" | "outline" | "characters" | "world" | "logic" | "history";
 type AiAction = "outline" | "outline-volume" | "outline-node" | "expand" | "revise" | "logic";
 type NodeCreateDraft = { type: "volume" | "chapter" | "scene"; parentId: string | null; afterId: string | null; title: string; summary: string; heading: string };
 type RelationshipDraft = { sourceCharacterId: string; targetCharacterId: string; type: string; description: string };
+type CharacterImportPreview = { fileName: string; data: CharacterImportData; missingNames: string[] };
 type AiProposal = { type: "text"; result: string; targetChapterId?: string; requestId?: string } | {
   type: "outline";
   proposal: { rationale: string; nodes: Array<{ type: "volume" | "chapter" | "scene"; title: string; summary: string }> };
@@ -73,6 +76,8 @@ export function StoryStudio() {
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [newProjectTitle, setNewProjectTitle] = useState("");
   const [relationshipDraft, setRelationshipDraft] = useState<RelationshipDraft | null>(null);
+  const [characterImportPreview, setCharacterImportPreview] = useState<CharacterImportPreview | null>(null);
+  const characterImportInputRef = useRef<HTMLInputElement>(null);
   const [settings, setSettings] = useState<ModelSettings>(() => {
     if (typeof window === "undefined") return defaultSettings;
     const saved = localStorage.getItem("story-studio-model-settings");
@@ -344,6 +349,35 @@ export function StoryStudio() {
     }
   };
 
+  const readCharacterImportFile = async (file?: File) => {
+    if (!workspace || !file) return;
+    try {
+      const data = parseCharacterImportJson(await file.text());
+      const availableNames = new Set([
+        ...workspace.characters.map((character) => normalizeCharacterName(character.name)),
+        ...data.characters.map((character) => normalizeCharacterName(character.name)),
+      ]);
+      const missingNames = Array.from(new Set(data.relationships.flatMap((relationship) => [relationship.sourceName, relationship.targetName])
+        .filter((name) => !availableNames.has(normalizeCharacterName(name)))));
+      setCharacterImportPreview({ fileName: file.name, data, missingNames });
+      setMessage("");
+    } catch (error) {
+      setCharacterImportPreview(null);
+      setMessage(error instanceof Error ? `JSON 导入失败：${error.message}` : "JSON 导入失败");
+    } finally {
+      if (characterImportInputRef.current) characterImportInputRef.current.value = "";
+    }
+  };
+
+  const importCharactersFromJson = async () => {
+    if (!workspace || !characterImportPreview || characterImportPreview.missingNames.length) return;
+    const result = await mutate("import-characters-json", { projectId: workspace.project.id, data: characterImportPreview.data });
+    if (result) {
+      setCharacterImportPreview(null);
+      setMessage(`JSON 导入完成：${result}`);
+    }
+  };
+
   const wordCount = useMemo(() => chapterDraft?.content.replace(/\s/g, "").length ?? 0, [chapterDraft?.content]);
   const activeChapterOutline = useMemo(() => workspace?.outline.find((node) => node.id === chapterDraft?.outlineNodeId) ?? null, [workspace?.outline, chapterDraft?.outlineNodeId]);
   const activeChapterScenes = useMemo(() => activeChapterOutline ? workspace?.outline.filter((node) => node.type === "scene" && node.parentId === activeChapterOutline.id) ?? [] : [], [workspace?.outline, activeChapterOutline]);
@@ -448,7 +482,7 @@ export function StoryStudio() {
         )}
 
         {activeTab === "characters" && (
-          <ContentPage eyebrow="CAST" title="人物与关系" description="人物动机、秘密和说话方式是连续性检查的基础。" action={<button className="primary-button" onClick={async () => { const name = window.prompt("人物姓名"); if (name) await mutate("create-character", { projectId: workspace.project.id, name }); }}><CirclePlus size={17} />添加人物</button>}>
+          <ContentPage eyebrow="CAST" title="人物与关系" description="人物动机、秘密和说话方式是连续性检查的基础。" action={<div className="page-actions"><input ref={characterImportInputRef} className="visually-hidden" type="file" accept="application/json,.json" onChange={(event) => void readCharacterImportFile(event.target.files?.[0])} /><button className="secondary-button" onClick={() => characterImportInputRef.current?.click()}><Upload size={17} />导入 JSON</button><button className="primary-button" onClick={async () => { const name = window.prompt("人物姓名"); if (name) await mutate("create-character", { projectId: workspace.project.id, name }); }}><CirclePlus size={17} />添加人物</button></div>}>
             <div className="character-layout">
               <div className="character-grid">{workspace.characters.map((character) => <button key={character.id} className={character.id === selectedCharacterId ? "character-card selected" : "character-card"} onClick={() => { setSelectedCharacterId(character.id); setCharacterDraft({ ...character }); }}><div className="avatar">{character.name.slice(0, 1)}</div><div><h3>{character.name}</h3><span>{character.role || "待设定角色"}</span><p>{character.goal || character.description}</p></div></button>)}</div>
               {characterDraft && <div className="detail-editor"><div className="section-heading"><div><span className="eyebrow">CHARACTER CARD</span><h2>{characterDraft.name}</h2></div><button className="primary-button small" onClick={() => void mutate("save-character", characterDraft as unknown as Record<string, unknown>)}><Save size={15} />保存</button></div><Field label="姓名" value={characterDraft.name} onChange={(name) => setCharacterDraft({ ...characterDraft, name })} /><Field label="角色" value={characterDraft.role} onChange={(role) => setCharacterDraft({ ...characterDraft, role })} /><Field label="描述" value={characterDraft.description} multiline onChange={(description) => setCharacterDraft({ ...characterDraft, description })} /><div className="two-columns"><Field label="目标" value={characterDraft.goal} onChange={(goal) => setCharacterDraft({ ...characterDraft, goal })} /><Field label="恐惧" value={characterDraft.fear} onChange={(fear) => setCharacterDraft({ ...characterDraft, fear })} /></div><Field label="秘密" value={characterDraft.secret} onChange={(secret) => setCharacterDraft({ ...characterDraft, secret })} /><Field label="说话风格" value={characterDraft.voice} multiline onChange={(voice) => setCharacterDraft({ ...characterDraft, voice })} /><button className="danger-button full-danger" onClick={async () => { const relationshipCount = workspace.relationships.filter((relationship) => relationship.sourceCharacterId === characterDraft.id || relationship.targetCharacterId === characterDraft.id).length; if (!window.confirm(`确认删除人物“${characterDraft.name}”？${relationshipCount ? `\n同时会删除与此人物有关的 ${relationshipCount} 条关系。` : ""}`)) return; const result = await mutate("delete-character", { id: characterDraft.id }); if (result) setMessage("人物及其相关关系已删除"); }}>删除这个人物</button></div>}
@@ -485,6 +519,7 @@ export function StoryStudio() {
       {overallOutlineOpen && <div className="modal-backdrop" onMouseDown={() => setOverallOutlineOpen(false)}><section className="settings-modal wide-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">AI STORY ARCHITECT</span><h2>{aiAction === "outline-volume" ? `展开《${outlineDraft?.title || "本卷"}》` : "构思或扩充整体大纲"}</h2></div><button className="icon-button" aria-label="关闭整体大纲构思" onClick={() => setOverallOutlineOpen(false)}><X size={19} /></button></div><p className="modal-help">{aiAction === "outline-volume" ? `AI 只为当前卷提出指定数量的章与场景。接受后会追加到本卷，不覆盖已有章节，并自动建立对应写作章节。${outlineDraft?.type === "chapter" ? "当前旧版卷会转换为正式的卷；已有正文会保留为卷下的“已有草稿”章节。" : ""}` : "AI 会根据作品类型、核心构想和写作规则，生成指定数量的卷及每卷介绍。之后可分别把每一卷展开为章节。"}</p><div className="active-model-line"><Bot size={14} /><span>{settings.provider === "openai-compatible" ? "本地模型" : "OpenAI"}：{settings.model}</span><button className="text-button" onClick={() => { setOverallOutlineOpen(false); setModelCheckMessage(""); setSettingsOpen(true); }}>更改</button></div><label className="field count-field"><span>{aiAction === "outline-volume" ? "需要生成多少章" : "预想的卷数"}</span><input type="number" min={1} max={20} value={aiAction === "outline-volume" ? volumeChapterCount : outlineVolumeCount} onChange={(event) => { const value = Math.max(1, Math.min(20, Number(event.target.value) || 1)); if (aiAction === "outline-volume") setVolumeChapterCount(value); else setOutlineVolumeCount(value); }} /></label><textarea className="prompt-box outline-modal-prompt" value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder={aiAction === "outline-volume" ? "例如：每章包含两个关键场景；本卷结尾揭示主角记忆存在人为修改……" : "例如：设计悬疑科幻故事；前期发现现实裂缝，中期追查系统真相，结尾完成牺牲与反转……"} /><button className="primary-button full" disabled={busy || !aiInstruction.trim()} onClick={() => void callAi(aiAction === "outline-volume" ? "outline-volume" : "outline")}>{busy ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}{busy ? "正在生成，请稍候……" : aiAction === "outline-volume" ? `生成 ${volumeChapterCount} 章提案` : `生成 ${outlineVolumeCount} 卷整体大纲`}</button>{busy && <p className="generation-note">本地大模型需要先推理，复杂大纲通常要等待几十秒。</p>}{aiError && <div className="ai-error"><AlertTriangle size={16} /><span>{aiError}</span></div>}{(proposal?.type === "outline" || proposal?.type === "outline-volume") && <ProposalCard proposal={proposal} onApply={() => void applyProposal()} onClose={() => setProposal(null)} />}</section></div>}
       {newProjectOpen && <div className="modal-backdrop" onMouseDown={() => setNewProjectOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">NEW PROJECT</span><h2>新建作品</h2></div><button className="icon-button" aria-label="关闭新建作品" onClick={() => setNewProjectOpen(false)}><X size={19} /></button></div><label className="field"><span>作品名称</span><input autoFocus value={newProjectTitle} onChange={(event) => setNewProjectTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newProjectTitle.trim()) void createNewProject(); }} placeholder="例如：雾港来信" /></label><p className="modal-help">新作品会自动建立“第一章”，并与现有作品的数据完全分开。</p><button className="primary-button full" disabled={!newProjectTitle.trim() || busy} onClick={() => void createNewProject()}><CirclePlus size={17} />创建作品</button></section></div>}
       {relationshipDraft && <div className="modal-backdrop" onMouseDown={() => setRelationshipDraft(null)}><section className="settings-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">CHARACTER RELATIONSHIP</span><h2>添加人物关系</h2></div><button className="icon-button" aria-label="关闭添加人物关系" onClick={() => setRelationshipDraft(null)}><X size={19} /></button></div><p className="modal-help">直接从当前作品已有的人物中选择关系双方。这条关系会进入后续 AI 写作上下文。</p><div className="two-columns"><Field label="起点人物" value={relationshipDraft.sourceCharacterId} options={workspace.characters.map((character) => ({ label: character.name, value: character.id }))} onChange={(sourceCharacterId) => { const targetCharacterId = sourceCharacterId === relationshipDraft.targetCharacterId ? workspace.characters.find((character) => character.id !== sourceCharacterId)?.id || "" : relationshipDraft.targetCharacterId; setRelationshipDraft({ ...relationshipDraft, sourceCharacterId, targetCharacterId }); }} /><Field label="目标人物" value={relationshipDraft.targetCharacterId} options={workspace.characters.map((character) => ({ label: character.name, value: character.id }))} onChange={(targetCharacterId) => { const sourceCharacterId = targetCharacterId === relationshipDraft.sourceCharacterId ? workspace.characters.find((character) => character.id !== targetCharacterId)?.id || "" : relationshipDraft.sourceCharacterId; setRelationshipDraft({ ...relationshipDraft, sourceCharacterId, targetCharacterId }); }} /></div><Field label="关系类型" value={relationshipDraft.type} onChange={(type) => setRelationshipDraft({ ...relationshipDraft, type })} /><Field label="关系说明" value={relationshipDraft.description} multiline onChange={(description) => setRelationshipDraft({ ...relationshipDraft, description })} /><button className="primary-button full" disabled={busy || !relationshipDraft.type.trim() || relationshipDraft.sourceCharacterId === relationshipDraft.targetCharacterId} onClick={() => void createRelationship()}><CirclePlus size={17} />确认添加关系</button></section></div>}
+      {characterImportPreview && <div className="modal-backdrop" onMouseDown={() => setCharacterImportPreview(null)}><section className="settings-modal wide-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">JSON IMPORT PREVIEW</span><h2>导入人物与关系</h2></div><button className="icon-button" aria-label="关闭 JSON 导入预览" onClick={() => setCharacterImportPreview(null)}><X size={19} /></button></div><p className="modal-help">文件：{characterImportPreview.fileName}。同名人物会合并：JSON 中的非空字段覆盖旧值，空字段保留原内容。</p><div className="import-summary"><span><strong>{characterImportPreview.data.characters.length}</strong> 个人物</span><span><strong>{characterImportPreview.data.relationships.length}</strong> 条关系</span></div><div className="import-preview-list">{characterImportPreview.data.characters.map((character) => { const existing = workspace.characters.some((item) => normalizeCharacterName(item.name) === normalizeCharacterName(character.name)); return <div className="import-preview-row" key={character.name}><span className={existing ? "import-status update" : "import-status"}>{existing ? "合并" : "新增"}</span><div><strong>{character.name}</strong><small>{character.role || character.description || "未填写角色说明"}</small></div></div>; })}{characterImportPreview.data.relationships.map((relationship, index) => <div className="import-preview-row relationship" key={`${relationship.sourceName}-${relationship.targetName}-${relationship.type}-${index}`}><span className="import-status relation">关系</span><div><strong>{relationship.sourceName} → {relationship.targetName}</strong><small>{relationship.type}{relationship.description ? `：${relationship.description}` : ""}</small></div></div>)}</div>{characterImportPreview.missingNames.length > 0 && <div className="ai-error"><AlertTriangle size={16} /><span>以下关系人物既不在文件中，也不在当前作品中：{characterImportPreview.missingNames.join("、")}。请先把他们加入 characters 数组。</span></div>}<div className="modal-button-row"><button className="secondary-button" onClick={() => setCharacterImportPreview(null)}>取消</button><button className="primary-button" disabled={busy || characterImportPreview.missingNames.length > 0} onClick={() => void importCharactersFromJson()}>{busy ? <LoaderCircle className="spin" size={17} /> : <Upload size={17} />}确认导入</button></div></section></div>}
     </main>
   );
 }

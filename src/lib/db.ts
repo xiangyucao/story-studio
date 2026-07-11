@@ -15,6 +15,7 @@ import type {
   Workspace,
   WorldEntry,
 } from "./types";
+import { normalizeCharacterImportData, normalizeCharacterName } from "./character-import";
 
 const dataDir = process.env.STORY_STUDIO_DATA_DIR
   ? path.resolve(process.env.STORY_STUDIO_DATA_DIR)
@@ -367,6 +368,70 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
     case "delete-character":
       db.prepare("DELETE FROM characters WHERE id=?").run(payload.id);
       return payload.id;
+    case "import-characters-json": {
+      const projectId = String(payload.projectId || "");
+      if (!projectId) throw new Error("缺少作品编号");
+      const imported = normalizeCharacterImportData(payload.data);
+      return db.transaction(() => {
+        type CharacterRow = { id: string; name: string; role: string; description: string; goal: string; fear: string; secret: string; voice: string };
+        const rows = db.prepare("SELECT id, name, role, description, goal, fear, secret, voice FROM characters WHERE project_id=?").all(projectId) as CharacterRow[];
+        const charactersByName = new Map(rows.map((row) => [normalizeCharacterName(row.name), row]));
+        let charactersCreated = 0;
+        let charactersUpdated = 0;
+        let relationshipsCreated = 0;
+        let relationshipsUpdated = 0;
+
+        imported.characters.forEach((character) => {
+          const key = normalizeCharacterName(character.name);
+          const existing = charactersByName.get(key);
+          if (existing) {
+            const merged = {
+              name: character.name,
+              role: character.role || existing.role,
+              description: character.description || existing.description,
+              goal: character.goal || existing.goal,
+              fear: character.fear || existing.fear,
+              secret: character.secret || existing.secret,
+              voice: character.voice || existing.voice,
+            };
+            db.prepare("UPDATE characters SET name=?, role=?, description=?, goal=?, fear=?, secret=?, voice=? WHERE id=?").run(
+              merged.name, merged.role, merged.description, merged.goal, merged.fear, merged.secret, merged.voice, existing.id,
+            );
+            const updated = { ...existing, ...merged };
+            charactersByName.set(key, updated);
+            charactersUpdated += 1;
+          } else {
+            const characterId = id();
+            db.prepare("INSERT INTO characters VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')").run(
+              characterId, projectId, character.name, character.role, character.description, character.goal, character.fear, character.secret, character.voice,
+            );
+            charactersByName.set(key, { id: characterId, ...character });
+            charactersCreated += 1;
+          }
+        });
+
+        imported.relationships.forEach((relationship) => {
+          const source = charactersByName.get(normalizeCharacterName(relationship.sourceName));
+          const target = charactersByName.get(normalizeCharacterName(relationship.targetName));
+          if (!source || !target) throw new Error(`关系“${relationship.sourceName} → ${relationship.targetName}”中的人物不存在`);
+          if (source.id === target.id) throw new Error("一条关系需要两个不同的人物");
+          const existing = db.prepare("SELECT id, description FROM relationships WHERE project_id=? AND source_character_id=? AND target_character_id=? AND type=?").get(
+            projectId, source.id, target.id, relationship.type,
+          ) as { id: string; description: string } | undefined;
+          if (existing) {
+            if (relationship.description) db.prepare("UPDATE relationships SET description=? WHERE id=?").run(relationship.description, existing.id);
+            relationshipsUpdated += 1;
+          } else {
+            db.prepare("INSERT INTO relationships VALUES (?, ?, ?, ?, ?, ?)").run(
+              id(), projectId, source.id, target.id, relationship.type, relationship.description,
+            );
+            relationshipsCreated += 1;
+          }
+        });
+
+        return `新增 ${charactersCreated} 人，更新 ${charactersUpdated} 人；新增 ${relationshipsCreated} 条关系，更新 ${relationshipsUpdated} 条关系`;
+      })();
+    }
     case "create-world": {
       const entryId = id();
       db.prepare("INSERT INTO world_entries VALUES (?, ?, ?, ?, ?, ?)").run(entryId, payload.projectId, payload.category || "背景", payload.name || "新设定", payload.description || "", payload.isCanon === false ? 0 : 1);
