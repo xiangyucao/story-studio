@@ -341,6 +341,14 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
       db.prepare("INSERT INTO story_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(eventId, payload.projectId, payload.chapterId || null, payload.title || "新事件", payload.storyTime || "", payload.description || "", payload.causes || "", payload.consequences || "");
       return eventId;
     }
+    case "save-event":
+      db.prepare("UPDATE story_events SET title=?, story_time=?, description=?, causes=?, consequences=? WHERE id=?").run(
+        payload.title || "未命名事件", payload.storyTime || "", payload.description || "", payload.causes || "", payload.consequences || "", payload.id,
+      );
+      return payload.id;
+    case "delete-event":
+      db.prepare("DELETE FROM story_events WHERE id=?").run(payload.id);
+      return payload.id;
     case "create-relationship": {
       const relationId = id();
       db.prepare("INSERT INTO relationships VALUES (?, ?, ?, ?, ?, ?)").run(relationId, payload.projectId, payload.sourceCharacterId, payload.targetCharacterId, payload.type || "关系", payload.description || "");
