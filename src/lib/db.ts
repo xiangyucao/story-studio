@@ -270,6 +270,18 @@ export function createIllustration(input: { projectId: string; chapterId: string
   return illustrationId;
 }
 
+function normalizeOutlinePositions(projectId: string) {
+  const rows = db.prepare("SELECT id FROM outline_nodes WHERE project_id=? ORDER BY position, rowid").all(projectId) as Array<{ id: string }>;
+  const update = db.prepare("UPDATE outline_nodes SET position=? WHERE id=?");
+  rows.forEach((row, index) => update.run(index, row.id));
+}
+
+function normalizeChapterPositions(projectId: string) {
+  const rows = db.prepare("SELECT id FROM chapters WHERE project_id=? ORDER BY position, rowid").all(projectId) as Array<{ id: string }>;
+  const update = db.prepare("UPDATE chapters SET position=? WHERE id=?");
+  rows.forEach((row, index) => update.run(index, row.id));
+}
+
 export function getIllustrationAsset(illustrationId: string) {
   return db.prepare("SELECT stored_name, file_name, mime_type FROM illustrations WHERE id=?").get(illustrationId) as { stored_name: string; file_name: string; mime_type: string } | undefined;
 }
@@ -325,6 +337,54 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
       const relationId = id();
       db.prepare("INSERT INTO relationships VALUES (?, ?, ?, ?, ?, ?)").run(relationId, payload.projectId, payload.sourceCharacterId, payload.targetCharacterId, payload.type || "关系", payload.description || "");
       return relationId;
+    }
+    case "create-outline-node": {
+      const projectId = String(payload.projectId);
+      const nodeType = String(payload.type) as OutlineNode["type"];
+      if (!(["volume", "chapter", "scene"] as string[]).includes(nodeType)) throw new Error("不支持的大纲节点类型");
+      const nodeId = id();
+      db.transaction(() => {
+        normalizeOutlinePositions(projectId);
+        const total = db.prepare("SELECT COUNT(*) AS count FROM outline_nodes WHERE project_id=?").get(projectId) as { count: number };
+        let insertPosition = total.count;
+        if (payload.afterId) {
+          const result = db.prepare(`WITH RECURSIVE subtree(id) AS (
+            SELECT id FROM outline_nodes WHERE id=? AND project_id=?
+            UNION ALL
+            SELECT child.id FROM outline_nodes child JOIN subtree parent ON child.parent_id=parent.id
+          ) SELECT COALESCE(MAX(position), -1) AS position FROM outline_nodes WHERE id IN (SELECT id FROM subtree)`).get(payload.afterId, projectId) as { position: number };
+          if (result.position >= 0) insertPosition = result.position + 1;
+        }
+        const chapterPosition = (db.prepare("SELECT COUNT(*) AS count FROM outline_nodes WHERE project_id=? AND type='chapter' AND position<?").get(projectId, insertPosition) as { count: number }).count;
+        db.prepare("UPDATE outline_nodes SET position=position+1 WHERE project_id=? AND position>=?").run(projectId, insertPosition);
+        db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, ?, ?, ?, ?, ?, 'planned', 1)").run(
+          nodeId, projectId, payload.parentId || null, nodeType, payload.title || "新节点", payload.summary || "", insertPosition,
+        );
+        if (nodeType === "chapter") {
+          db.prepare("UPDATE chapters SET position=position+1 WHERE project_id=? AND position>=?").run(projectId, chapterPosition);
+          db.prepare("INSERT INTO chapters (id, project_id, outline_node_id, title, content, summary, status, position, word_count, outline_stale, based_on_outline_revision, updated_at) VALUES (?, ?, ?, ?, '', ?, 'draft', ?, 0, 0, 1, ?)").run(
+            id(), projectId, nodeId, payload.title || "新章节", payload.summary || "", chapterPosition, timestamp,
+          );
+        }
+      })();
+      return nodeId;
+    }
+    case "delete-outline-node": {
+      const node = db.prepare("SELECT id, project_id FROM outline_nodes WHERE id=?").get(payload.id) as { id: string; project_id: string } | undefined;
+      if (!node) throw new Error("大纲节点不存在");
+      db.transaction(() => {
+        const descendants = db.prepare(`WITH RECURSIVE subtree(id) AS (
+          SELECT id FROM outline_nodes WHERE id=?
+          UNION ALL
+          SELECT child.id FROM outline_nodes child JOIN subtree parent ON child.parent_id=parent.id
+        ) SELECT id FROM subtree`).all(payload.id) as Array<{ id: string }>;
+        const deleteChapter = db.prepare("DELETE FROM chapters WHERE outline_node_id=?");
+        descendants.forEach((item) => deleteChapter.run(item.id));
+        db.prepare("DELETE FROM outline_nodes WHERE id=?").run(payload.id);
+        normalizeOutlinePositions(node.project_id);
+        normalizeChapterPositions(node.project_id);
+      })();
+      return node.project_id;
     }
     case "save-outline-node": {
       const previous = db.prepare("SELECT title, summary, status FROM outline_nodes WHERE id=?").get(payload.id) as { title: string; summary: string; status: string } | undefined;

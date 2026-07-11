@@ -11,6 +11,7 @@ import type { Chapter, Character, ModelSettings, Project, Workspace } from "@/li
 
 type Tab = "write" | "outline" | "characters" | "world" | "logic" | "history";
 type AiAction = "outline" | "outline-node" | "expand" | "revise" | "logic";
+type NodeCreateDraft = { type: "volume" | "chapter" | "scene"; parentId: string | null; afterId: string | null; title: string; summary: string; heading: string };
 type AiProposal = { type: "text"; result: string } | {
   type: "outline";
   proposal: { rationale: string; nodes: Array<{ type: "volume" | "chapter" | "scene"; title: string; summary: string }> };
@@ -53,6 +54,8 @@ export function StoryStudio() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [overallOutlineOpen, setOverallOutlineOpen] = useState(false);
+  const [nodeCreateDraft, setNodeCreateDraft] = useState<NodeCreateDraft | null>(null);
+  const [deleteOutlineOpen, setDeleteOutlineOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [newProjectTitle, setNewProjectTitle] = useState("");
   const [settings, setSettings] = useState<ModelSettings>(() => {
@@ -68,7 +71,7 @@ export function StoryStudio() {
   const [logicQuery, setLogicQuery] = useState("");
   const [logicAnswer, setLogicAnswer] = useState("");
 
-  const loadWorkspace = useCallback(async (projectId?: string) => {
+  const loadWorkspace = useCallback(async (projectId?: string, preferredOutlineId?: string) => {
     setBusy(true);
     try {
       const data = await jsonFetch<Workspace>(`/api/workspace${projectId ? `?projectId=${projectId}` : ""}`);
@@ -76,7 +79,7 @@ export function StoryStudio() {
       setProjectDraft({ ...data.project });
       const chapter = data.chapters.find((item) => item.id === selectedChapterId) ?? data.chapters[0] ?? null;
       const character = data.characters.find((item) => item.id === selectedCharacterId) ?? data.characters[0] ?? null;
-      const outlineNode = data.outline.find((item) => item.id === selectedOutlineId) ?? data.outline[0] ?? null;
+      const outlineNode = data.outline.find((item) => item.id === (preferredOutlineId || selectedOutlineId)) ?? data.outline[0] ?? null;
       setSelectedChapterId(chapter?.id || "");
       setChapterDraft(chapter);
       setSelectedCharacterId(character?.id || "");
@@ -223,8 +226,47 @@ export function StoryStudio() {
     }
   };
 
+  const createOutlineNode = async () => {
+    if (!workspace || !nodeCreateDraft?.title.trim()) return;
+    const newId = await mutate("create-outline-node", {
+      projectId: workspace.project.id,
+      type: nodeCreateDraft.type,
+      parentId: nodeCreateDraft.parentId,
+      afterId: nodeCreateDraft.afterId,
+      title: nodeCreateDraft.title.trim(),
+      summary: nodeCreateDraft.summary.trim(),
+    }, false);
+    if (newId) {
+      await loadWorkspace(workspace.project.id, newId);
+      setNodeCreateDraft(null);
+      setMessage(nodeCreateDraft.type === "chapter" ? "新章已插入，并建立了对应写作章节" : "大纲节点已插入");
+    }
+  };
+
+  const deleteSelectedOutline = async () => {
+    if (!workspace || !outlineDraft) return;
+    const preferred = outlineDraft.parentId || undefined;
+    await mutate("delete-outline-node", { id: outlineDraft.id }, false);
+    setDeleteOutlineOpen(false);
+    await loadWorkspace(workspace.project.id, preferred);
+    setMessage("大纲节点及其下级内容已删除");
+  };
+
   const wordCount = useMemo(() => chapterDraft?.content.replace(/\s/g, "").length ?? 0, [chapterDraft?.content]);
   const activeChapterOutline = useMemo(() => workspace?.outline.find((node) => node.id === chapterDraft?.outlineNodeId) ?? null, [workspace?.outline, chapterDraft?.outlineNodeId]);
+  const deleteImpact = useMemo(() => {
+    if (!workspace || !outlineDraft) return { nodes: 0, chapters: 0, writtenChapters: 0, words: 0 };
+    const ids = new Set<string>([outlineDraft.id]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      workspace.outline.forEach((node) => {
+        if (node.parentId && ids.has(node.parentId) && !ids.has(node.id)) { ids.add(node.id); changed = true; }
+      });
+    }
+    const chapters = workspace.chapters.filter((chapter) => chapter.outlineNodeId && ids.has(chapter.outlineNodeId));
+    return { nodes: ids.size, chapters: chapters.length, writtenChapters: chapters.filter((chapter) => chapter.content.trim()).length, words: chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0) };
+  }, [workspace, outlineDraft]);
 
   if (!workspace) {
     return <main className="loading-screen"><LoaderCircle className="spin" /><span>正在打开故事工作台…</span></main>;
@@ -297,9 +339,10 @@ export function StoryStudio() {
             {projectDraft && <div className="project-foundation"><div className="section-heading"><div><span className="eyebrow">STORY FOUNDATION</span><h2>作品基石</h2></div><button className="primary-button small" onClick={() => void mutate("save-project", projectDraft as unknown as Record<string, unknown>)}><Save size={15} />保存</button></div><div className="foundation-grid"><Field label="作品名" value={projectDraft.title} onChange={(title) => setProjectDraft({ ...projectDraft, title })} /><Field label="类型" value={projectDraft.genre} onChange={(genre) => setProjectDraft({ ...projectDraft, genre })} /></div><Field label="核心构想" value={projectDraft.premise} multiline onChange={(premise) => setProjectDraft({ ...projectDraft, premise })} /><Field label="写作规则 / 风格指南" value={projectDraft.styleGuide} multiline onChange={(styleGuide) => setProjectDraft({ ...projectDraft, styleGuide })} /></div>}
             <div className="outline-grid">
               <div className="outline-tree">
+                <div className="outline-tree-header"><div><span className="eyebrow">OUTLINE TREE</span><strong>卷 · 章 · 场景</strong></div><button className="secondary-button" onClick={() => setNodeCreateDraft({ type: "volume", parentId: null, afterId: workspace.outline.at(-1)?.id || null, title: `第${workspace.outline.filter((node) => node.type === "volume").length + 1}卷`, summary: "", heading: "添加新卷" })}><CirclePlus size={15} />添加卷</button></div>
                 {workspace.outline.map((node) => <button key={node.id} className={`outline-node depth-${node.type}${node.id === selectedOutlineId ? " selected" : ""}`} onClick={() => { setSelectedOutlineId(node.id); setOutlineDraft({ ...node }); setProposal(null); setOutlineAiInstruction(""); }}><span className={`node-type ${node.type}`}>{node.type === "volume" ? "卷" : node.type === "chapter" ? "章" : "场"}</span><div><h3>{node.title}</h3><p>{node.summary || "尚未填写摘要"}</p></div><span className="status-pill">v{node.revision} · {node.status}</span></button>)}
               </div>
-              <div className="outline-side">{outlineDraft && <><div className="detail-editor outline-editor"><div className="section-heading"><div><span className="eyebrow">SELECTED NODE</span><h2>{outlineDraft.type === "volume" ? "卷" : outlineDraft.type === "chapter" ? "章" : "场景"}节点</h2></div><button className="primary-button small" onClick={async () => { await mutate("save-outline-node", outlineDraft as unknown as Record<string, unknown>); setMessage("大纲节点已保存；关联正文已按需标记"); }}><Save size={15} />保存</button></div><Field label="标题" value={outlineDraft.title} onChange={(title) => setOutlineDraft({ ...outlineDraft, title })} /><Field label="剧情摘要 / 本节点要完成的任务" value={outlineDraft.summary} multiline onChange={(summary) => setOutlineDraft({ ...outlineDraft, summary })} /><Field label="状态" value={outlineDraft.status} options={[{ label: "计划中", value: "planned" }, { label: "已起草", value: "drafted" }, { label: "已完成", value: "complete" }]} onChange={(status) => setOutlineDraft({ ...outlineDraft, status })} />{outlineDraft.type === "chapter" && (() => { const linked = workspace.chapters.find((chapter) => chapter.outlineNodeId === outlineDraft.id); return linked ? <button className="secondary-button full-action" onClick={() => selectChapter(linked)}><FileText size={15} />进入本章写作{linked.outlineStale ? "（待同步）" : ""}</button> : null; })()}</div><div className="inline-ai-card node-ai-card"><Sparkles size={20} /><h3>AI 单独修改这个节点</h3><p>只修改当前节点，不会改动其他卷、章或场景。</p><textarea value={outlineAiInstruction} onChange={(e) => setOutlineAiInstruction(e.target.value)} placeholder="例如：保留结局不变，但让本章中点出现一次更强的错误判断……" /><button className="primary-button full" onClick={() => void callAi("outline-node")} disabled={busy || !outlineAiInstruction.trim()}>生成节点修改提案</button>{proposal?.type === "outline-node" && <ProposalCard proposal={proposal} onApply={() => void applyProposal()} onClose={() => setProposal(null)} />}</div></>}</div>
+              <div className="outline-side">{outlineDraft && <><div className="detail-editor outline-editor"><div className="section-heading"><div><span className="eyebrow">SELECTED NODE</span><h2>{outlineDraft.type === "volume" ? "卷" : outlineDraft.type === "chapter" ? "章" : "场景"}节点</h2></div><button className="primary-button small" onClick={async () => { await mutate("save-outline-node", outlineDraft as unknown as Record<string, unknown>); setMessage("大纲节点已保存；关联正文已按需标记"); }}><Save size={15} />保存</button></div><Field label="标题" value={outlineDraft.title} onChange={(title) => setOutlineDraft({ ...outlineDraft, title })} /><Field label="剧情摘要 / 本节点要完成的任务" value={outlineDraft.summary} multiline onChange={(summary) => setOutlineDraft({ ...outlineDraft, summary })} /><Field label="状态" value={outlineDraft.status} options={[{ label: "计划中", value: "planned" }, { label: "已起草", value: "drafted" }, { label: "已完成", value: "complete" }]} onChange={(status) => setOutlineDraft({ ...outlineDraft, status })} />{outlineDraft.type === "chapter" && (() => { const linked = workspace.chapters.find((chapter) => chapter.outlineNodeId === outlineDraft.id); return linked ? <button className="secondary-button full-action" onClick={() => selectChapter(linked)}><FileText size={15} />进入本章写作{linked.outlineStale ? "（待同步）" : ""}</button> : null; })()}<div className="outline-structure-actions">{outlineDraft.type === "volume" && <><button onClick={() => setNodeCreateDraft({ type: "chapter", parentId: outlineDraft.id, afterId: outlineDraft.id, title: "新章", summary: "", heading: `在《${outlineDraft.title}》中添加章节` })}><CirclePlus size={14} />本卷添加章</button><button onClick={() => setNodeCreateDraft({ type: "volume", parentId: null, afterId: outlineDraft.id, title: "新卷", summary: "", heading: `在《${outlineDraft.title}》后插入新卷` })}><CirclePlus size={14} />后插新卷</button></>}{outlineDraft.type === "chapter" && <><button onClick={() => setNodeCreateDraft({ type: "scene", parentId: outlineDraft.id, afterId: outlineDraft.id, title: "新场景", summary: "", heading: `在《${outlineDraft.title}》中添加场景` })}><CirclePlus size={14} />本章添加场景</button><button onClick={() => setNodeCreateDraft({ type: "chapter", parentId: outlineDraft.parentId, afterId: outlineDraft.id, title: "新章", summary: "", heading: `在《${outlineDraft.title}》后插入新章` })}><CirclePlus size={14} />后插新章</button></>}{outlineDraft.type === "scene" && <button onClick={() => setNodeCreateDraft({ type: "scene", parentId: outlineDraft.parentId, afterId: outlineDraft.id, title: "新场景", summary: "", heading: `在《${outlineDraft.title}》后插入场景` })}><CirclePlus size={14} />后插场景</button>}<button className="danger-text-button" onClick={() => setDeleteOutlineOpen(true)}>删除此{outlineDraft.type === "volume" ? "卷" : outlineDraft.type === "chapter" ? "章" : "场景"}</button></div></div><div className="inline-ai-card node-ai-card"><Sparkles size={20} /><h3>AI 单独修改这个节点</h3><p>只修改当前节点，不会改动其他卷、章或场景。</p><textarea value={outlineAiInstruction} onChange={(e) => setOutlineAiInstruction(e.target.value)} placeholder="例如：保留结局不变，但让本章中点出现一次更强的错误判断……" /><button className="primary-button full" onClick={() => void callAi("outline-node")} disabled={busy || !outlineAiInstruction.trim()}>生成节点修改提案</button>{proposal?.type === "outline-node" && <ProposalCard proposal={proposal} onApply={() => void applyProposal()} onClose={() => setProposal(null)} />}</div></>}</div>
             </div>
           </ContentPage>
         )}
@@ -337,6 +380,8 @@ export function StoryStudio() {
 
       {settingsOpen && <div className="modal-backdrop" onMouseDown={() => setSettingsOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">MODEL PROVIDER</span><h2>模型设置</h2></div><button className="icon-button" onClick={() => setSettingsOpen(false)}><X size={19} /></button></div><Field label="提供方" value={settings.provider} options={[{ label: "OpenAI Responses API", value: "openai" }, { label: "本地 / OpenAI-compatible", value: "openai-compatible" }]} onChange={(provider) => setSettings({ ...settings, provider: provider as ModelSettings["provider"] })} /><Field label="模型名称" value={settings.model} onChange={(model) => setSettings({ ...settings, model })} />{settings.provider === "openai-compatible" && <Field label="Base URL" value={settings.baseUrl || ""} onChange={(baseUrl) => setSettings({ ...settings, baseUrl })} />}<div className="security-note">API Key 不会存入浏览器。OpenAI 使用服务器端 <code>OPENAI_API_KEY</code>；本地模型默认无需密钥。</div><button className="primary-button full" onClick={() => { localStorage.setItem("story-studio-model-settings", JSON.stringify(settings)); setSettingsOpen(false); setMessage("模型设置已保存在本机浏览器"); }}><Save size={17} />保存设置</button></section></div>}
       {exportOpen && <div className="modal-backdrop" onMouseDown={() => setExportOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">EXPORT</span><h2>导出《{workspace.project.title}》</h2></div><button className="icon-button" onClick={() => setExportOpen(false)}><X size={19} /></button></div><div className="export-options"><button onClick={() => { window.open(`/export/${workspace.project.id}`, "_blank", "noopener,noreferrer"); setExportOpen(false); }}><span className="export-icon"><Printer size={22} /></span><div><strong>PDF / 打印稿</strong><small>A4 专业排版，包含章节插画；在打印窗口选择“另存为 PDF”。</small></div><ChevronRight size={17} /></button><a href={`/api/export/markdown?projectId=${workspace.project.id}`} onClick={() => setExportOpen(false)}><span className="export-icon"><FileType2 size={22} /></span><div><strong>Markdown 原稿</strong><small>适合备份、版本管理以及导入其他写作工具。</small></div><ChevronRight size={17} /></a></div><div className="security-note">PDF 使用浏览器原生打印引擎，中文字体与插画会按当前电脑的实际效果排版。</div></section></div>}
+      {nodeCreateDraft && <div className="modal-backdrop" onMouseDown={() => setNodeCreateDraft(null)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">INSERT OUTLINE NODE</span><h2>{nodeCreateDraft.heading}</h2></div><button className="icon-button" aria-label="关闭新增大纲节点" onClick={() => setNodeCreateDraft(null)}><X size={19} /></button></div><div className="node-kind-preview"><span className={`node-type ${nodeCreateDraft.type}`}>{nodeCreateDraft.type === "volume" ? "卷" : nodeCreateDraft.type === "chapter" ? "章" : "场"}</span><p>{nodeCreateDraft.type === "chapter" ? "保存后会同时建立对应的写作章节。" : nodeCreateDraft.type === "scene" ? "场景会归入当前章节，不单独建立正文文件。" : "新卷可以继续添加章节和场景。"}</p></div><Field label="标题" value={nodeCreateDraft.title} onChange={(title) => setNodeCreateDraft({ ...nodeCreateDraft, title })} /><Field label="剧情摘要 / 要完成的任务" value={nodeCreateDraft.summary} multiline onChange={(summary) => setNodeCreateDraft({ ...nodeCreateDraft, summary })} /><button className="primary-button full" disabled={busy || !nodeCreateDraft.title.trim()} onClick={() => void createOutlineNode()}><CirclePlus size={16} />确认插入</button></section></div>}
+      {deleteOutlineOpen && outlineDraft && <div className="modal-backdrop" onMouseDown={() => setDeleteOutlineOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow danger-eyebrow">DELETE OUTLINE NODE</span><h2>删除《{outlineDraft.title}》？</h2></div><button className="icon-button" aria-label="关闭删除确认" onClick={() => setDeleteOutlineOpen(false)}><X size={19} /></button></div><div className="delete-impact"><AlertTriangle size={24} /><div><strong>此操作不能撤销</strong><p>将删除 {deleteImpact.nodes} 个大纲节点、{deleteImpact.chapters} 个关联章节。{deleteImpact.writtenChapters > 0 ? `其中 ${deleteImpact.writtenChapters} 章已有正文，共 ${deleteImpact.words} 字，也会一并删除。` : "没有已写正文会受到影响。"}</p></div></div><div className="modal-button-row"><button className="secondary-button" onClick={() => setDeleteOutlineOpen(false)}>取消</button><button className="danger-button" disabled={busy} onClick={() => void deleteSelectedOutline()}>确认删除</button></div></section></div>}
       {overallOutlineOpen && <div className="modal-backdrop" onMouseDown={() => setOverallOutlineOpen(false)}><section className="settings-modal wide-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">AI STORY ARCHITECT</span><h2>构思或扩充整体大纲</h2></div><button className="icon-button" aria-label="关闭整体大纲构思" onClick={() => setOverallOutlineOpen(false)}><X size={19} /></button></div><p className="modal-help">AI 会返回结构化的卷、章、场景提案。接受后，每个“章”都会自动建立可写作的章节。</p><textarea className="prompt-box outline-modal-prompt" value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder="例如：设计三卷十二章的悬疑故事。第一卷完成回乡与错误线索，第二卷揭开家族关系，第三卷回收仓库和潮汐伏笔……" /><button className="primary-button full" disabled={busy || !aiInstruction.trim()} onClick={() => void callAi("outline")}><Sparkles size={17} />生成结构化整体大纲</button>{proposal?.type === "outline" && <ProposalCard proposal={proposal} onApply={() => void applyProposal()} onClose={() => setProposal(null)} />}</section></div>}
       {newProjectOpen && <div className="modal-backdrop" onMouseDown={() => setNewProjectOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">NEW PROJECT</span><h2>新建作品</h2></div><button className="icon-button" aria-label="关闭新建作品" onClick={() => setNewProjectOpen(false)}><X size={19} /></button></div><label className="field"><span>作品名称</span><input autoFocus value={newProjectTitle} onChange={(event) => setNewProjectTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newProjectTitle.trim()) void createNewProject(); }} placeholder="例如：雾港来信" /></label><p className="modal-help">新作品会自动建立“第一章”，并与现有作品的数据完全分开。</p><button className="primary-button full" disabled={!newProjectTitle.trim() || busy} onClick={() => void createNewProject()}><CirclePlus size={17} />创建作品</button></section></div>}
     </main>
