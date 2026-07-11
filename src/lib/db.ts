@@ -364,6 +364,9 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
     case "save-character":
       db.prepare("UPDATE characters SET name=?, role=?, description=?, goal=?, fear=?, secret=?, voice=?, status=? WHERE id=?").run(payload.name, payload.role, payload.description, payload.goal, payload.fear, payload.secret, payload.voice, payload.status ?? "active", payload.id);
       return payload.id;
+    case "delete-character":
+      db.prepare("DELETE FROM characters WHERE id=?").run(payload.id);
+      return payload.id;
     case "create-world": {
       const entryId = id();
       db.prepare("INSERT INTO world_entries VALUES (?, ?, ?, ?, ?, ?)").run(entryId, payload.projectId, payload.category || "背景", payload.name || "新设定", payload.description || "", payload.isCanon === false ? 0 : 1);
@@ -391,6 +394,11 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
       db.prepare("DELETE FROM story_events WHERE id=?").run(payload.id);
       return payload.id;
     case "create-relationship": {
+      if (payload.sourceCharacterId === payload.targetCharacterId) throw new Error("一条关系需要两个不同的人物");
+      const characterCount = (db.prepare("SELECT COUNT(*) AS count FROM characters WHERE project_id=? AND id IN (?, ?)").get(
+        payload.projectId, payload.sourceCharacterId, payload.targetCharacterId,
+      ) as { count: number }).count;
+      if (characterCount !== 2) throw new Error("关系中的人物不存在或不属于当前作品");
       const relationId = id();
       db.prepare("INSERT INTO relationships VALUES (?, ?, ?, ?, ?, ?)").run(relationId, payload.projectId, payload.sourceCharacterId, payload.targetCharacterId, payload.type || "关系", payload.description || "");
       return relationId;
