@@ -29,8 +29,10 @@ const navItems: Array<{ id: Tab; label: string; icon: typeof BookOpen }> = [
 const defaultSettings: ModelSettings = {
   provider: "openai",
   model: "gpt-5.4-mini",
-  baseUrl: "http://127.0.0.1:11434/v1",
+  baseUrl: "http://127.0.0.1:18080/v1",
 };
+
+type ModelDiscovery = { found: boolean; baseUrl: string; models: string[] };
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) } });
@@ -52,6 +54,8 @@ export function StoryStudio() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modelCheckBusy, setModelCheckBusy] = useState(false);
+  const [modelCheckMessage, setModelCheckMessage] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
   const [overallOutlineOpen, setOverallOutlineOpen] = useState(false);
   const [nodeCreateDraft, setNodeCreateDraft] = useState<NodeCreateDraft | null>(null);
@@ -68,6 +72,7 @@ export function StoryStudio() {
   const [proposalAction, setProposalAction] = useState<AiAction>("revise");
   const [outlineAiInstruction, setOutlineAiInstruction] = useState("");
   const [proposal, setProposal] = useState<AiProposal | null>(null);
+  const [aiError, setAiError] = useState("");
   const [logicQuery, setLogicQuery] = useState("");
   const [logicAnswer, setLogicAnswer] = useState("");
 
@@ -99,6 +104,16 @@ export function StoryStudio() {
     void loadWorkspace();
     // 初次加载只执行一次；后续刷新由显式操作触发。
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (localStorage.getItem("story-studio-model-settings")) return;
+    void jsonFetch<ModelDiscovery>("/api/models").then((detected) => {
+      const next = { provider: "openai-compatible" as const, model: detected.models[0], baseUrl: detected.baseUrl };
+      setSettings(next);
+      localStorage.setItem("story-studio-model-settings", JSON.stringify(next));
+      setMessage(`已自动连接本地模型：${next.model}`);
+    }).catch(() => undefined);
   }, []);
 
   const mutate = async (action: string, payload: Record<string, unknown>, reload = true) => {
@@ -137,6 +152,7 @@ export function StoryStudio() {
     if (!workspace || !instruction.trim()) return;
     setBusy(true);
     setMessage("");
+    setAiError("");
     setProposal(null);
     try {
       const data = await jsonFetch<AiProposal>("/api/ai", {
@@ -153,9 +169,31 @@ export function StoryStudio() {
       setProposal(data);
       setProposalAction(action);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "AI 调用失败");
+      const detail = error instanceof Error ? error.message : "AI 调用失败";
+      setMessage(detail);
+      setAiError(detail);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const detectLocalModel = async (useCurrentUrl = false) => {
+    setModelCheckBusy(true);
+    setModelCheckMessage("正在检测本机模型服务……");
+    try {
+      const detected = await jsonFetch<ModelDiscovery>("/api/models", useCurrentUrl ? {
+        method: "POST",
+        body: JSON.stringify({ baseUrl: settings.baseUrl }),
+      } : undefined);
+      const next = { provider: "openai-compatible" as const, model: detected.models[0], baseUrl: detected.baseUrl };
+      setSettings(next);
+      localStorage.setItem("story-studio-model-settings", JSON.stringify(next));
+      setModelCheckMessage(`连接成功：${next.model}`);
+      setMessage(`已连接并保存本地模型：${next.model}`);
+    } catch (error) {
+      setModelCheckMessage(error instanceof Error ? error.message : "没有发现本地模型");
+    } finally {
+      setModelCheckBusy(false);
     }
   };
 
@@ -335,7 +373,7 @@ export function StoryStudio() {
         )}
 
         {activeTab === "outline" && (
-          <ContentPage eyebrow="STRUCTURE" title="故事大纲" description="先确定卷、章和场景，再进入写作扩展；每个节点都可以独立修改。" action={<button className="primary-button" onClick={() => { setAiAction("outline"); setAiInstruction(""); setProposal(null); setOverallOutlineOpen(true); }}><Sparkles size={17} />用 AI 构思整体大纲</button>}>
+          <ContentPage eyebrow="STRUCTURE" title="故事大纲" description="先确定卷、章和场景，再进入写作扩展；每个节点都可以独立修改。" action={<button className="primary-button" onClick={() => { setAiAction("outline"); setAiInstruction(""); setProposal(null); setAiError(""); setOverallOutlineOpen(true); }}><Sparkles size={17} />用 AI 构思整体大纲</button>}>
             {projectDraft && <div className="project-foundation"><div className="section-heading"><div><span className="eyebrow">STORY FOUNDATION</span><h2>作品基石</h2></div><button className="primary-button small" onClick={() => void mutate("save-project", projectDraft as unknown as Record<string, unknown>)}><Save size={15} />保存</button></div><div className="foundation-grid"><Field label="作品名" value={projectDraft.title} onChange={(title) => setProjectDraft({ ...projectDraft, title })} /><Field label="类型" value={projectDraft.genre} onChange={(genre) => setProjectDraft({ ...projectDraft, genre })} /></div><Field label="核心构想" value={projectDraft.premise} multiline onChange={(premise) => setProjectDraft({ ...projectDraft, premise })} /><Field label="写作规则 / 风格指南" value={projectDraft.styleGuide} multiline onChange={(styleGuide) => setProjectDraft({ ...projectDraft, styleGuide })} /></div>}
             <div className="outline-grid">
               <div className="outline-tree">
@@ -378,11 +416,11 @@ export function StoryStudio() {
         )}
       </section>
 
-      {settingsOpen && <div className="modal-backdrop" onMouseDown={() => setSettingsOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">MODEL PROVIDER</span><h2>模型设置</h2></div><button className="icon-button" onClick={() => setSettingsOpen(false)}><X size={19} /></button></div><Field label="提供方" value={settings.provider} options={[{ label: "OpenAI Responses API", value: "openai" }, { label: "本地 / OpenAI-compatible", value: "openai-compatible" }]} onChange={(provider) => setSettings({ ...settings, provider: provider as ModelSettings["provider"] })} /><Field label="模型名称" value={settings.model} onChange={(model) => setSettings({ ...settings, model })} />{settings.provider === "openai-compatible" && <Field label="Base URL" value={settings.baseUrl || ""} onChange={(baseUrl) => setSettings({ ...settings, baseUrl })} />}<div className="security-note">API Key 不会存入浏览器。OpenAI 使用服务器端 <code>OPENAI_API_KEY</code>；本地模型默认无需密钥。</div><button className="primary-button full" onClick={() => { localStorage.setItem("story-studio-model-settings", JSON.stringify(settings)); setSettingsOpen(false); setMessage("模型设置已保存在本机浏览器"); }}><Save size={17} />保存设置</button></section></div>}
+      {settingsOpen && <div className="modal-backdrop" onMouseDown={() => setSettingsOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">MODEL PROVIDER</span><h2>模型设置</h2></div><button className="icon-button" onClick={() => setSettingsOpen(false)}><X size={19} /></button></div><button className="secondary-button full-action" disabled={modelCheckBusy} onClick={() => void detectLocalModel(false)}>{modelCheckBusy ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}自动检测并连接本机 llama.cpp</button><Field label="提供方" value={settings.provider} options={[{ label: "OpenAI Responses API", value: "openai" }, { label: "本地 / OpenAI-compatible", value: "openai-compatible" }]} onChange={(provider) => setSettings({ ...settings, provider: provider as ModelSettings["provider"] })} /><Field label="模型名称" value={settings.model} onChange={(model) => setSettings({ ...settings, model })} />{settings.provider === "openai-compatible" && <><Field label="Base URL" value={settings.baseUrl || ""} onChange={(baseUrl) => setSettings({ ...settings, baseUrl })} /><button className="text-button model-test-button" disabled={modelCheckBusy} onClick={() => void detectLocalModel(true)}>测试这个地址</button></>}{modelCheckMessage && <div className={modelCheckMessage.startsWith("连接成功") ? "model-check success" : "model-check"}>{modelCheckMessage}</div>}<div className="security-note">API Key 不会存入浏览器。OpenAI 使用服务器端 <code>OPENAI_API_KEY</code>；本地模型默认无需密钥。</div><button className="primary-button full" onClick={() => { localStorage.setItem("story-studio-model-settings", JSON.stringify(settings)); setSettingsOpen(false); setMessage("模型设置已保存在本机浏览器"); }}><Save size={17} />保存设置</button></section></div>}
       {exportOpen && <div className="modal-backdrop" onMouseDown={() => setExportOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">EXPORT</span><h2>导出《{workspace.project.title}》</h2></div><button className="icon-button" onClick={() => setExportOpen(false)}><X size={19} /></button></div><div className="export-options"><button onClick={() => { window.open(`/export/${workspace.project.id}`, "_blank", "noopener,noreferrer"); setExportOpen(false); }}><span className="export-icon"><Printer size={22} /></span><div><strong>PDF / 打印稿</strong><small>A4 专业排版，包含章节插画；在打印窗口选择“另存为 PDF”。</small></div><ChevronRight size={17} /></button><a href={`/api/export/markdown?projectId=${workspace.project.id}`} onClick={() => setExportOpen(false)}><span className="export-icon"><FileType2 size={22} /></span><div><strong>Markdown 原稿</strong><small>适合备份、版本管理以及导入其他写作工具。</small></div><ChevronRight size={17} /></a></div><div className="security-note">PDF 使用浏览器原生打印引擎，中文字体与插画会按当前电脑的实际效果排版。</div></section></div>}
       {nodeCreateDraft && <div className="modal-backdrop" onMouseDown={() => setNodeCreateDraft(null)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">INSERT OUTLINE NODE</span><h2>{nodeCreateDraft.heading}</h2></div><button className="icon-button" aria-label="关闭新增大纲节点" onClick={() => setNodeCreateDraft(null)}><X size={19} /></button></div><div className="node-kind-preview"><span className={`node-type ${nodeCreateDraft.type}`}>{nodeCreateDraft.type === "volume" ? "卷" : nodeCreateDraft.type === "chapter" ? "章" : "场"}</span><p>{nodeCreateDraft.type === "chapter" ? "保存后会同时建立对应的写作章节。" : nodeCreateDraft.type === "scene" ? "场景会归入当前章节，不单独建立正文文件。" : "新卷可以继续添加章节和场景。"}</p></div><Field label="标题" value={nodeCreateDraft.title} onChange={(title) => setNodeCreateDraft({ ...nodeCreateDraft, title })} /><Field label="剧情摘要 / 要完成的任务" value={nodeCreateDraft.summary} multiline onChange={(summary) => setNodeCreateDraft({ ...nodeCreateDraft, summary })} /><button className="primary-button full" disabled={busy || !nodeCreateDraft.title.trim()} onClick={() => void createOutlineNode()}><CirclePlus size={16} />确认插入</button></section></div>}
       {deleteOutlineOpen && outlineDraft && <div className="modal-backdrop" onMouseDown={() => setDeleteOutlineOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow danger-eyebrow">DELETE OUTLINE NODE</span><h2>删除《{outlineDraft.title}》？</h2></div><button className="icon-button" aria-label="关闭删除确认" onClick={() => setDeleteOutlineOpen(false)}><X size={19} /></button></div><div className="delete-impact"><AlertTriangle size={24} /><div><strong>此操作不能撤销</strong><p>将删除 {deleteImpact.nodes} 个大纲节点、{deleteImpact.chapters} 个关联章节。{deleteImpact.writtenChapters > 0 ? `其中 ${deleteImpact.writtenChapters} 章已有正文，共 ${deleteImpact.words} 字，也会一并删除。` : "没有已写正文会受到影响。"}</p></div></div><div className="modal-button-row"><button className="secondary-button" onClick={() => setDeleteOutlineOpen(false)}>取消</button><button className="danger-button" disabled={busy} onClick={() => void deleteSelectedOutline()}>确认删除</button></div></section></div>}
-      {overallOutlineOpen && <div className="modal-backdrop" onMouseDown={() => setOverallOutlineOpen(false)}><section className="settings-modal wide-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">AI STORY ARCHITECT</span><h2>构思或扩充整体大纲</h2></div><button className="icon-button" aria-label="关闭整体大纲构思" onClick={() => setOverallOutlineOpen(false)}><X size={19} /></button></div><p className="modal-help">AI 会返回结构化的卷、章、场景提案。接受后，每个“章”都会自动建立可写作的章节。</p><textarea className="prompt-box outline-modal-prompt" value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder="例如：设计三卷十二章的悬疑故事。第一卷完成回乡与错误线索，第二卷揭开家族关系，第三卷回收仓库和潮汐伏笔……" /><button className="primary-button full" disabled={busy || !aiInstruction.trim()} onClick={() => void callAi("outline")}><Sparkles size={17} />生成结构化整体大纲</button>{proposal?.type === "outline" && <ProposalCard proposal={proposal} onApply={() => void applyProposal()} onClose={() => setProposal(null)} />}</section></div>}
+      {overallOutlineOpen && <div className="modal-backdrop" onMouseDown={() => setOverallOutlineOpen(false)}><section className="settings-modal wide-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">AI STORY ARCHITECT</span><h2>构思或扩充整体大纲</h2></div><button className="icon-button" aria-label="关闭整体大纲构思" onClick={() => setOverallOutlineOpen(false)}><X size={19} /></button></div><p className="modal-help">AI 会返回结构化的卷、章、场景提案。接受后，每个“章”都会自动建立可写作的章节。</p><div className="active-model-line"><Bot size={14} /><span>{settings.provider === "openai-compatible" ? "本地模型" : "OpenAI"}：{settings.model}</span><button className="text-button" onClick={() => { setOverallOutlineOpen(false); setModelCheckMessage(""); setSettingsOpen(true); }}>更改</button></div><textarea className="prompt-box outline-modal-prompt" value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder="例如：设计三卷十二章的悬疑故事。第一卷完成回乡与错误线索，第二卷揭开家族关系，第三卷回收仓库和潮汐伏笔……" /><button className="primary-button full" disabled={busy || !aiInstruction.trim()} onClick={() => void callAi("outline")}>{busy ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}{busy ? "正在生成，请稍候……" : "生成结构化整体大纲"}</button>{busy && <p className="generation-note">本地大模型需要先推理，复杂大纲通常要等待几十秒。</p>}{aiError && <div className="ai-error"><AlertTriangle size={16} /><span>{aiError}</span></div>}{proposal?.type === "outline" && <ProposalCard proposal={proposal} onApply={() => void applyProposal()} onClose={() => setProposal(null)} />}</section></div>}
       {newProjectOpen && <div className="modal-backdrop" onMouseDown={() => setNewProjectOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">NEW PROJECT</span><h2>新建作品</h2></div><button className="icon-button" aria-label="关闭新建作品" onClick={() => setNewProjectOpen(false)}><X size={19} /></button></div><label className="field"><span>作品名称</span><input autoFocus value={newProjectTitle} onChange={(event) => setNewProjectTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newProjectTitle.trim()) void createNewProject(); }} placeholder="例如：雾港来信" /></label><p className="modal-help">新作品会自动建立“第一章”，并与现有作品的数据完全分开。</p><button className="primary-button full" disabled={!newProjectTitle.trim() || busy} onClick={() => void createNewProject()}><CirclePlus size={17} />创建作品</button></section></div>}
     </main>
   );
