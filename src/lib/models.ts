@@ -82,7 +82,7 @@ export async function generateOutline(settings: ModelSettings, context: string, 
 
 export async function generateVolumeExpansion(settings: ModelSettings, context: string, currentVolume: string, instruction: string, chapterCount = 7) {
   const client = clientFor(settings);
-  const system = `你是长篇小说分卷策划编辑。把用户指定的一卷细化为恰好 ${chapterCount} 个可写作的章，可在每章后附场景。严格尊重全书人物、关系、硬设定和事件因果。只规划这一卷，不修改或重复其他卷，不写正文。章标题必须使用“第X章”或具体情节名称，绝不能使用“第X卷”。每个场景必须紧跟在所属章之后。`;
+  const system = `你是长篇小说分卷策划编辑。把用户指定的一卷细化为恰好 ${chapterCount} 个可写作的章，可在每章后附场景。每一章必须有明确标题，并用 summary 提供可直接指导写作的章节介绍。严格尊重全书人物、关系、硬设定和事件因果。只规划这一卷，不修改或重复其他卷，不写正文。章标题必须使用“第X章”或具体情节名称，绝不能使用“第X卷”。每个场景必须紧跟在所属章之后。`;
   const input = `${context}\n\n待展开的卷：\n${currentVolume}\n\n用户要求：${instruction}\n\n再次确认：恰好生成 ${chapterCount} 章，不得把其他卷当成章。`;
   if (settings.provider === "openai") {
     const response = await client.responses.parse({
