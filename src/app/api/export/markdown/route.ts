@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWorkspace } from "@/lib/db";
+import { groupChaptersByVolume } from "@/lib/manuscript";
 
 export const runtime = "nodejs";
 
@@ -7,18 +8,26 @@ export async function GET(request: NextRequest) {
   try {
     const projectId = request.nextUrl.searchParams.get("projectId") || undefined;
     const workspace = getWorkspace(projectId);
+    const groups = groupChaptersByVolume(workspace).map((group) => ({
+      ...group,
+      chapters: group.chapters.filter((chapter) => chapter.content.trim() || workspace.illustrations.some((image) => image.chapterId === chapter.id)),
+    })).filter((group) => group.chapters.length);
     const sections = [
       `# ${workspace.project.title}`,
       workspace.project.genre ? `> 类型：${workspace.project.genre}` : "",
       workspace.project.premise,
-      ...workspace.chapters.filter((chapter) => chapter.content.trim() || workspace.illustrations.some((image) => image.chapterId === chapter.id)).flatMap((chapter) => {
-        const images = workspace.illustrations.filter((image) => image.chapterId === chapter.id);
-        return [
-          `\n## ${chapter.title}`,
-          chapter.content,
-          ...images.map((image) => `\n![${image.caption || image.fileName}](/api/assets/${image.id})\n${image.caption ? `*${image.caption}*` : ""}`),
-        ];
-      }),
+      ...groups.flatMap((group) => [
+        `\n## ${group.volume?.title || "未归档章节"}`,
+        group.volume?.summary ? `> ${group.volume.summary}` : "",
+        ...group.chapters.flatMap((chapter) => {
+          const images = workspace.illustrations.filter((image) => image.chapterId === chapter.id);
+          return [
+            `\n### ${chapter.title}`,
+            chapter.content,
+            ...images.map((image) => `\n![${image.caption || image.fileName}](/api/assets/${image.id})\n${image.caption ? `*${image.caption}*` : ""}`),
+          ];
+        }),
+      ]),
     ].filter(Boolean);
     return new NextResponse(sections.join("\n\n"), {
       headers: {
