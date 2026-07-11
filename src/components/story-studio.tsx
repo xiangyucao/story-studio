@@ -12,7 +12,7 @@ import type { Chapter, Character, ModelSettings, Project, StoryEvent, Workspace,
 type Tab = "write" | "outline" | "characters" | "world" | "logic" | "history";
 type AiAction = "outline" | "outline-volume" | "outline-node" | "expand" | "revise" | "logic";
 type NodeCreateDraft = { type: "volume" | "chapter" | "scene"; parentId: string | null; afterId: string | null; title: string; summary: string; heading: string };
-type AiProposal = { type: "text"; result: string } | {
+type AiProposal = { type: "text"; result: string; targetChapterId?: string; requestId?: string } | {
   type: "outline";
   proposal: { rationale: string; nodes: Array<{ type: "volume" | "chapter" | "scene"; title: string; summary: string }> };
 } | {
@@ -42,7 +42,7 @@ const isVolumeLikeNode = (node: Workspace["outline"][number]) => node.type === "
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) } });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "请求失败");
+  if (!response.ok) throw new Error(`${data.error || "请求失败"}${data.requestId ? `（日志编号：${data.requestId}）` : ""}`);
   return data as T;
 }
 
@@ -179,7 +179,7 @@ export function StoryStudio() {
         body: JSON.stringify({
           action,
           projectId: workspace.project.id,
-          chapterId: selectedChapterId || undefined,
+          chapterId: chapterDraft?.id || undefined,
           selection: action === "outline-node" || action === "outline-volume" ? JSON.stringify(outlineDraft) : chapterDraft?.content,
           instruction,
           count: action === "outline-volume" ? volumeChapterCount : action === "outline" ? outlineVolumeCount : undefined,
@@ -220,6 +220,10 @@ export function StoryStudio() {
   const applyProposal = async () => {
     if (!proposal || !workspace) return;
     if (proposal.type === "text") {
+      if (proposal.targetChapterId && proposal.targetChapterId !== chapterDraft?.id) {
+        setMessage("这份 AI 提案属于另一个章节，已阻止误写入。请回到原章节接受，或在当前章节重新生成。");
+        return;
+      }
       await saveChapter(`AI：${aiInstruction || "按最新大纲生成"}`, proposal.result, proposalAction === "expand");
     } else if (proposal.type === "outline-node") {
       if (!outlineDraft) return;
@@ -523,7 +527,7 @@ function OutlineTreeBranch({ node, nodes, selectedId, collapsedVolumes, onToggle
 }
 
 function ProposalCard({ proposal, onApply, onClose }: { proposal: AiProposal; onApply: () => void; onClose: () => void }) {
-  return <div className="proposal-card"><div className="proposal-head"><strong>AI 提案</strong><button onClick={onClose}><X size={15} /></button></div>{proposal.type === "text" ? <p>{proposal.result.slice(0, 900)}{proposal.result.length > 900 ? "…" : ""}</p> : proposal.type === "outline-node" ? <div><p>{proposal.proposal.rationale}</p><div className="proposal-node"><span>节点</span><strong>{proposal.proposal.title}</strong><small>{proposal.proposal.summary}</small></div></div> : <div><p>{proposal.proposal.rationale}</p>{proposal.proposal.nodes.map((node, index) => <div className="proposal-node" key={`${node.title}-${index}`}><span>{node.type}</span><strong>{node.title}</strong><small>{node.summary}</small></div>)}</div>}<button className="accept-button" onClick={onApply}><Check size={16} />接受并写入</button></div>;
+  return <div className="proposal-card"><div className="proposal-head"><strong>AI 提案</strong><button onClick={onClose}><X size={15} /></button></div>{proposal.type === "text" ? <p>{proposal.result.slice(0, 900)}{proposal.result.length > 900 ? "…" : ""}</p> : proposal.type === "outline-node" ? <div><p>{proposal.proposal.rationale}</p><div className="proposal-node"><span>节点</span><strong>{proposal.proposal.title}</strong><small>{proposal.proposal.summary}</small></div></div> : <div><p>{proposal.proposal.rationale}</p>{proposal.proposal.nodes.map((node, index) => <div className="proposal-node" key={`${node.title}-${index}`}><span>{node.type}</span><strong>{node.title}</strong><small>{node.summary}</small></div>)}</div>}{proposal.type === "text" && proposal.requestId && <small className="proposal-log-id">日志编号：{proposal.requestId}</small>}<button className="accept-button" onClick={onApply}><Check size={16} />接受并写入</button></div>;
 }
 
 function Field({ label, value, onChange, multiline, options }: { label: string; value: string; onChange: (value: string) => void; multiline?: boolean; options?: Array<{ label: string; value: string }> }) {

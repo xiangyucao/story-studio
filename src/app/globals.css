@@ -129,6 +129,7 @@ button { cursor: pointer; }
 .proposal-node span { grid-row: 1 / 3; color: var(--accent); font-size: 9px; }
 .proposal-node strong { font-size: 11px; }
 .proposal-node small { color: var(--muted); font-size: 10px; }
+.proposal-log-id { display: block; margin-top: 9px; color: #9b9288; font-size: 9px; word-break: break-all; }
 .accept-button { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 8px; color: #fff; background: var(--sage); border: 0; border-radius: 7px; font-size: 11px; }
 
 .content-page { max-width: 1240px; margin: 0 auto; padding: 40px clamp(28px, 5vw, 72px) 80px; }
