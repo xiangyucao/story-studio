@@ -15,16 +15,18 @@ export async function POST(request: NextRequest) {
       chapterId?: string;
       instruction: string;
       selection?: string;
+      count?: number;
       settings: ModelSettings;
     };
     if (!body.instruction?.trim()) return NextResponse.json({ error: "请输入对 AI 的要求" }, { status: 400 });
     const workspace = getWorkspace(body.projectId);
     const context = buildStoryContext(workspace, body.chapterId);
+    const count = Math.max(1, Math.min(20, Math.round(Number(body.count) || 7)));
     if (body.action === "outline") {
-      return NextResponse.json({ type: "outline", proposal: await generateOutline(body.settings, context, body.instruction) });
+      return NextResponse.json({ type: "outline", proposal: await generateOutline(body.settings, context, body.instruction, count) });
     }
     if (body.action === "outline-volume") {
-      return NextResponse.json({ type: "outline-volume", proposal: await generateVolumeExpansion(body.settings, context, body.selection || "", body.instruction) });
+      return NextResponse.json({ type: "outline-volume", proposal: await generateVolumeExpansion(body.settings, context, body.selection || "", body.instruction, count) });
     }
     if (body.action === "outline-node") {
       return NextResponse.json({ type: "outline-node", proposal: await generateOutlineNode(body.settings, context, body.selection || "", body.instruction) });

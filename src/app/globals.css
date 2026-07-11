@@ -238,6 +238,7 @@ button { cursor: pointer; }
 .model-check.success { color: #35614a; background: #eaf5ee; }
 .active-model-line { display: flex; align-items: center; gap: 7px; margin: 12px 0 4px; padding: 9px 11px; color: var(--muted); background: #f4efe8; border-radius: 7px; font-size: 11px; }
 .active-model-line span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.count-field { max-width: 210px; margin-top: 12px; }
 .generation-note { margin: 7px 0 0; color: var(--muted); font-size: 10px; text-align: center; }
 .ai-error { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; padding: 10px 12px; color: #8d3528; background: #fff0ec; border-radius: 7px; font-size: 11px; line-height: 1.5; }
 .ai-error svg { flex: 0 0 auto; margin-top: 1px; }

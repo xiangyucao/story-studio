@@ -154,6 +154,7 @@ db.exec(`
 type Row = Record<string, unknown>;
 const now = () => new Date().toISOString();
 const id = () => randomUUID();
+const volumeTitlePattern = /^第[0-9一二三四五六七八九十百]+卷(?:[：:\s]|$)/;
 
 function projectFrom(row: Row): Project {
   return {
@@ -280,6 +281,46 @@ function normalizeChapterPositions(projectId: string) {
   const rows = db.prepare("SELECT id FROM chapters WHERE project_id=? ORDER BY position, rowid").all(projectId) as Array<{ id: string }>;
   const update = db.prepare("UPDATE chapters SET position=? WHERE id=?");
   rows.forEach((row, index) => update.run(index, row.id));
+}
+
+export function repairLegacyVolumeStructure() {
+  const projects = db.prepare("SELECT id FROM projects").all() as Array<{ id: string }>;
+  projects.forEach(({ id: projectId }) => db.transaction(() => {
+    let changed = false;
+    const legacyVolumes = db.prepare("SELECT id, title, summary FROM outline_nodes WHERE project_id=? AND parent_id IS NULL AND type='chapter' ORDER BY position, rowid").all(projectId) as Array<{ id: string; title: string; summary: string }>;
+    legacyVolumes.filter((node) => volumeTitlePattern.test(node.title)).forEach((node) => {
+      changed = true;
+      const current = db.prepare("SELECT position FROM outline_nodes WHERE id=?").get(node.id) as { position: number };
+      const linked = db.prepare("SELECT id, content FROM chapters WHERE outline_node_id=?").get(node.id) as { id: string; content: string } | undefined;
+      db.prepare("UPDATE outline_nodes SET type='volume' WHERE id=?").run(node.id);
+      if (linked?.content.trim()) {
+        const draftNodeId = id();
+        const draftTitle = `${node.title}（已有草稿）`;
+        db.prepare("UPDATE outline_nodes SET position=position+1 WHERE project_id=? AND position>?").run(projectId, current.position);
+        db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, ?, 'chapter', ?, ?, ?, 'drafted', 1)").run(
+          draftNodeId, projectId, node.id, draftTitle, node.summary, current.position + 1,
+        );
+        db.prepare("UPDATE chapters SET outline_node_id=?, title=? WHERE id=?").run(draftNodeId, draftTitle, linked.id);
+      } else {
+        db.prepare("DELETE FROM chapters WHERE outline_node_id=?").run(node.id);
+      }
+    });
+
+    const topVolumes = new Map((db.prepare("SELECT id, title FROM outline_nodes WHERE project_id=? AND parent_id IS NULL AND type='volume'").all(projectId) as Array<{ id: string; title: string }>).map((node) => [node.title, node.id]));
+    const possibleDuplicates = db.prepare("SELECT id, parent_id, title FROM outline_nodes WHERE project_id=? AND parent_id IS NOT NULL AND type='chapter'").all(projectId) as Array<{ id: string; parent_id: string; title: string }>;
+    possibleDuplicates.filter((node) => volumeTitlePattern.test(node.title) && topVolumes.has(node.title) && topVolumes.get(node.title) !== node.parent_id).forEach((node) => {
+      const linked = db.prepare("SELECT content FROM chapters WHERE outline_node_id=?").all(node.id) as Array<{ content: string }>;
+      if (linked.every((chapter) => !chapter.content.trim())) {
+        changed = true;
+        db.prepare("DELETE FROM chapters WHERE outline_node_id=?").run(node.id);
+        db.prepare("DELETE FROM outline_nodes WHERE id=?").run(node.id);
+      }
+    });
+    if (changed) {
+      normalizeOutlinePositions(projectId);
+      normalizeChapterPositions(projectId);
+    }
+  })());
 }
 
 export function getIllustrationAsset(illustrationId: string) {
@@ -426,6 +467,7 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
       if (!volume || (volume.type !== "volume" && !legacyVolume)) throw new Error("要展开的节点不是卷");
       const nodes = Array.isArray(payload.nodes) ? payload.nodes as Array<Record<string, unknown>> : [];
       if (!nodes.length) throw new Error("提案中没有可写入的章节");
+      if (nodes.some((node) => volumeTitlePattern.test(String(node.title || "")))) throw new Error("提案错误地把其他卷当成了章节，已阻止写入，请重新生成");
       db.transaction(() => {
         if (legacyVolume) {
           db.prepare("UPDATE outline_nodes SET type='volume' WHERE id=?").run(volumeId);
@@ -481,6 +523,7 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
     }
     case "apply-outline": {
       const nodes = Array.isArray(payload.nodes) ? payload.nodes as Array<Record<string, unknown>> : [];
+      if (!nodes.length || nodes.some((node) => node.type !== "volume")) throw new Error("整体大纲只能写入卷节点，请重新生成");
       const insert = db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, ?, ?, ?, ?, ?, 'planned', 1)");
       const insertChapter = db.prepare("INSERT INTO chapters (id, project_id, outline_node_id, title, content, summary, status, position, word_count, outline_stale, based_on_outline_revision, updated_at) VALUES (?, ?, ?, ?, '', ?, 'draft', ?, 0, 0, 1, ?)");
       const max = db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM outline_nodes WHERE project_id=?").get(payload.projectId) as { p: number };

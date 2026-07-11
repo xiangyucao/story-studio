@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createProject, getWorkspace, mutateWorkspace } from "@/lib/db";
+import { createProject, getWorkspace, mutateWorkspace, repairLegacyVolumeStructure } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
+    repairLegacyVolumeStructure();
     return NextResponse.json(getWorkspace(request.nextUrl.searchParams.get("projectId") || undefined));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "读取失败" }, { status: 500 });

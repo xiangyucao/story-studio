@@ -7,10 +7,10 @@ import type { ModelSettings } from "./types";
 export const outlineProposalSchema = z.object({
   rationale: z.string(),
   nodes: z.array(z.object({
-    type: z.enum(["volume", "chapter", "scene"]),
+    type: z.literal("volume"),
     title: z.string(),
     summary: z.string(),
-  })).min(1).max(30),
+  })).min(1).max(20),
 });
 
 export const volumeExpansionSchema = z.object({
@@ -19,7 +19,7 @@ export const volumeExpansionSchema = z.object({
     type: z.enum(["chapter", "scene"]),
     title: z.string(),
     summary: z.string(),
-  })).min(1).max(30),
+  })).min(1).max(60),
 });
 
 export const outlineNodeProposalSchema = z.object({
@@ -27,17 +27,6 @@ export const outlineNodeProposalSchema = z.object({
   title: z.string(),
   summary: z.string(),
 });
-
-const volumeLikeTitle = /^第[0-9一二三四五六七八九十百]+卷(?:[：:\s]|$)/;
-
-function normalizeOverallVolumes(proposal: z.infer<typeof outlineProposalSchema>) {
-  return {
-    ...proposal,
-    nodes: proposal.nodes.map((node) => node.type === "chapter" && volumeLikeTitle.test(node.title)
-      ? { ...node, type: "volume" as const }
-      : node),
-  };
-}
 
 function clientFor(settings: ModelSettings) {
   if (settings.provider === "openai") {
@@ -68,29 +57,33 @@ export async function generateText(settings: ModelSettings, system: string, prom
   return response.choices[0]?.message.content ?? "";
 }
 
-export async function generateOutline(settings: ModelSettings, context: string, instruction: string) {
+export async function generateOutline(settings: ModelSettings, context: string, instruction: string, volumeCount = 7) {
   const client = clientFor(settings);
-  const system = "你是长篇小说策划编辑。严格尊重已有硬设定和事件因果。只提出可执行的大纲节点，不写正文。";
+  const system = `你是长篇小说总纲编辑。严格尊重已有硬设定和事件因果。只规划全书的卷级结构，不规划章和场景，不写正文。必须恰好输出 ${volumeCount} 个 volume 节点，每卷都要有明确标题和介绍，依次覆盖故事的推进、转折与结局。`;
+  const input = `${context}\n\n用户要求：${instruction}\n\n再次确认：只输出 ${volumeCount} 卷，不要输出章或场景。`;
   if (settings.provider === "openai") {
     const response = await client.responses.parse({
       model: settings.model || process.env.OPENAI_MODEL || "gpt-5.4-mini",
       instructions: system,
-      input: `${context}\n\n用户要求：${instruction}`,
+      input,
       text: { format: zodTextFormat(outlineProposalSchema, "outline_proposal") },
     });
     if (!response.output_parsed) throw new Error("模型没有返回可解析的大纲");
-    return normalizeOverallVolumes(response.output_parsed);
+    if (response.output_parsed.nodes.length !== volumeCount) throw new Error(`模型返回了 ${response.output_parsed.nodes.length} 卷，但要求是 ${volumeCount} 卷，请重新生成`);
+    return response.output_parsed;
   }
-  const raw = await generateText(settings, `${system} 必须只返回 JSON，格式为 {"rationale":"...","nodes":[{"type":"chapter","title":"...","summary":"..."}]}`, `${context}\n\n用户要求：${instruction}`);
+  const raw = await generateText(settings, `${system} 必须只返回 JSON，格式为 {"rationale":"...","nodes":[{"type":"volume","title":"第一卷：...","summary":"本卷介绍..."}]}`, input);
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("本地模型没有返回 JSON 大纲");
-  return normalizeOverallVolumes(outlineProposalSchema.parse(JSON.parse(match[0])));
+  const parsed = outlineProposalSchema.parse(JSON.parse(match[0]));
+  if (parsed.nodes.length !== volumeCount) throw new Error(`本地模型返回了 ${parsed.nodes.length} 卷，但要求是 ${volumeCount} 卷，请重新生成`);
+  return parsed;
 }
 
-export async function generateVolumeExpansion(settings: ModelSettings, context: string, currentVolume: string, instruction: string) {
+export async function generateVolumeExpansion(settings: ModelSettings, context: string, currentVolume: string, instruction: string, chapterCount = 7) {
   const client = clientFor(settings);
-  const system = "你是长篇小说分卷策划编辑。把用户指定的一卷细化为可写作的章和场景，严格尊重全书人物、关系、硬设定和事件因果。只规划这一卷，不修改其他卷，不写正文。每个场景必须紧跟在所属章之后。";
-  const input = `${context}\n\n待展开的卷：\n${currentVolume}\n\n用户要求：${instruction}`;
+  const system = `你是长篇小说分卷策划编辑。把用户指定的一卷细化为恰好 ${chapterCount} 个可写作的章，可在每章后附场景。严格尊重全书人物、关系、硬设定和事件因果。只规划这一卷，不修改或重复其他卷，不写正文。章标题必须使用“第X章”或具体情节名称，绝不能使用“第X卷”。每个场景必须紧跟在所属章之后。`;
+  const input = `${context}\n\n待展开的卷：\n${currentVolume}\n\n用户要求：${instruction}\n\n再次确认：恰好生成 ${chapterCount} 章，不得把其他卷当成章。`;
   if (settings.provider === "openai") {
     const response = await client.responses.parse({
       model: settings.model || process.env.OPENAI_MODEL || "gpt-5.4-mini",
@@ -99,12 +92,17 @@ export async function generateVolumeExpansion(settings: ModelSettings, context: 
       text: { format: zodTextFormat(volumeExpansionSchema, "volume_expansion") },
     });
     if (!response.output_parsed) throw new Error("模型没有返回可解析的分卷章节");
+    const chapters = response.output_parsed.nodes.filter((node) => node.type === "chapter");
+    if (chapters.length !== chapterCount) throw new Error(`模型返回了 ${chapters.length} 章，但要求是 ${chapterCount} 章，请重新生成`);
     return response.output_parsed;
   }
   const raw = await generateText(settings, `${system} 必须只返回 JSON，格式为 {"rationale":"...","nodes":[{"type":"chapter","title":"...","summary":"..."},{"type":"scene","title":"...","summary":"..."}]}`, input);
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("本地模型没有返回 JSON 分卷章节");
-  return volumeExpansionSchema.parse(JSON.parse(match[0]));
+  const parsed = volumeExpansionSchema.parse(JSON.parse(match[0]));
+  const chapters = parsed.nodes.filter((node) => node.type === "chapter");
+  if (chapters.length !== chapterCount) throw new Error(`本地模型返回了 ${chapters.length} 章，但要求是 ${chapterCount} 章，请重新生成`);
+  return parsed;
 }
 
 export async function generateOutlineNode(settings: ModelSettings, context: string, currentNode: string, instruction: string) {
