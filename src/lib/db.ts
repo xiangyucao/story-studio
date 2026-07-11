@@ -402,6 +402,67 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
         (SELECT revision FROM outline_nodes WHERE id=chapters.outline_node_id), based_on_outline_revision
       ) WHERE id=?`).run(payload.id);
       return payload.id;
+    case "apply-volume-outline": {
+      const projectId = String(payload.projectId);
+      const volumeId = String(payload.volumeId);
+      const volume = db.prepare("SELECT id, type, title, summary, position FROM outline_nodes WHERE id=? AND project_id=?").get(volumeId, projectId) as { id: string; type: string; title: string; summary: string; position: number } | undefined;
+      const legacyVolume = volume?.type === "chapter" && /^第[0-9一二三四五六七八九十百]+卷(?:[：:\s]|$)/.test(volume.title);
+      if (!volume || (volume.type !== "volume" && !legacyVolume)) throw new Error("要展开的节点不是卷");
+      const nodes = Array.isArray(payload.nodes) ? payload.nodes as Array<Record<string, unknown>> : [];
+      if (!nodes.length) throw new Error("提案中没有可写入的章节");
+      db.transaction(() => {
+        if (legacyVolume) {
+          db.prepare("UPDATE outline_nodes SET type='volume' WHERE id=?").run(volumeId);
+          const linked = db.prepare("SELECT id, content FROM chapters WHERE outline_node_id=?").get(volumeId) as { id: string; content: string } | undefined;
+          if (linked?.content.trim()) {
+            const legacyDraftId = id();
+            const legacyTitle = `${volume.title}（已有草稿）`;
+            db.prepare("UPDATE outline_nodes SET position=position+1 WHERE project_id=? AND position>?").run(projectId, volume.position);
+            db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, ?, 'chapter', ?, ?, ?, 'drafted', 1)").run(
+              legacyDraftId, projectId, volumeId, legacyTitle, volume.summary, volume.position + 1,
+            );
+            db.prepare("UPDATE chapters SET outline_node_id=?, title=? WHERE id=?").run(legacyDraftId, legacyTitle, linked.id);
+          } else {
+            db.prepare("DELETE FROM chapters WHERE outline_node_id=?").run(volumeId);
+          }
+        }
+        normalizeOutlinePositions(projectId);
+        normalizeChapterPositions(projectId);
+        const subtreeEnd = db.prepare(`WITH RECURSIVE subtree(id) AS (
+          SELECT id FROM outline_nodes WHERE id=?
+          UNION ALL
+          SELECT child.id FROM outline_nodes child JOIN subtree parent ON child.parent_id=parent.id
+        ) SELECT MAX(position) AS position FROM outline_nodes WHERE id IN (SELECT id FROM subtree)`).get(volumeId) as { position: number };
+        const insertPosition = Number(subtreeEnd.position) + 1;
+        const chapterPosition = (db.prepare("SELECT COUNT(*) AS count FROM outline_nodes WHERE project_id=? AND type='chapter' AND position<?").get(projectId, insertPosition) as { count: number }).count;
+        const chapterCount = nodes.filter((node) => node.type === "chapter").length;
+        if (!chapterCount) throw new Error("分卷提案至少需要包含一章");
+        nodes.forEach((node) => {
+          if (node.type !== "chapter" && node.type !== "scene") throw new Error("分卷提案只能包含章和场景");
+        });
+        db.prepare("UPDATE outline_nodes SET position=position+? WHERE project_id=? AND position>=?").run(nodes.length, projectId, insertPosition);
+        db.prepare("UPDATE chapters SET position=position+? WHERE project_id=? AND position>=?").run(chapterCount, projectId, chapterPosition);
+        const insertNode = db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, ?, ?, ?, ?, ?, 'planned', 1)");
+        const insertChapter = db.prepare("INSERT INTO chapters (id, project_id, outline_node_id, title, content, summary, status, position, word_count, outline_stale, based_on_outline_revision, updated_at) VALUES (?, ?, ?, ?, '', ?, 'draft', ?, 0, 0, 1, ?)");
+        let activeChapterId: string | null = null;
+        let chapterOffset = 0;
+        nodes.forEach((node, index) => {
+          const nodeType = String(node.type) as "chapter" | "scene";
+          if (nodeType === "scene" && !activeChapterId) throw new Error("场景前必须先有所属章节");
+          const nodeId = id();
+          const title = String(node.title || `${nodeType === "chapter" ? "新章" : "新场景"} ${index + 1}`);
+          const summary = String(node.summary || "");
+          const parentId = nodeType === "chapter" ? volumeId : activeChapterId;
+          insertNode.run(nodeId, projectId, parentId, nodeType, title, summary, insertPosition + index);
+          if (nodeType === "chapter") {
+            activeChapterId = nodeId;
+            insertChapter.run(id(), projectId, nodeId, title, summary, chapterPosition + chapterOffset, timestamp);
+            chapterOffset += 1;
+          }
+        });
+      })();
+      return volumeId;
+    }
     case "apply-outline": {
       const nodes = Array.isArray(payload.nodes) ? payload.nodes as Array<Record<string, unknown>> : [];
       const insert = db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, ?, ?, ?, ?, ?, 'planned', 1)");

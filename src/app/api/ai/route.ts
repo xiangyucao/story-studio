@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWorkspace } from "@/lib/db";
 import { buildStoryContext } from "@/lib/context";
-import { generateOutline, generateOutlineNode, generateText } from "@/lib/models";
+import { generateOutline, generateOutlineNode, generateText, generateVolumeExpansion } from "@/lib/models";
 import type { ModelSettings } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -10,7 +10,7 @@ export const maxDuration = 120;
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as {
-      action: "outline" | "outline-node" | "expand" | "revise" | "logic";
+      action: "outline" | "outline-volume" | "outline-node" | "expand" | "revise" | "logic";
       projectId: string;
       chapterId?: string;
       instruction: string;
@@ -22,6 +22,9 @@ export async function POST(request: NextRequest) {
     const context = buildStoryContext(workspace, body.chapterId);
     if (body.action === "outline") {
       return NextResponse.json({ type: "outline", proposal: await generateOutline(body.settings, context, body.instruction) });
+    }
+    if (body.action === "outline-volume") {
+      return NextResponse.json({ type: "outline-volume", proposal: await generateVolumeExpansion(body.settings, context, body.selection || "", body.instruction) });
     }
     if (body.action === "outline-node") {
       return NextResponse.json({ type: "outline-node", proposal: await generateOutlineNode(body.settings, context, body.selection || "", body.instruction) });

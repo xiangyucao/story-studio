@@ -2,6 +2,10 @@ import type { Workspace } from "./types";
 
 export function buildStoryContext(workspace: Workspace, chapterId?: string) {
   const chapter = workspace.chapters.find((item) => item.id === chapterId);
+  const chapterOutline = workspace.outline.find((item) => item.id === chapter?.outlineNodeId);
+  const chapterScenes = chapterOutline
+    ? workspace.outline.filter((item) => item.type === "scene" && item.parentId === chapterOutline.id)
+    : [];
   const nearby = chapter
     ? workspace.chapters.filter((item) => Math.abs(item.position - chapter.position) <= 1)
     : workspace.chapters.slice(0, 6);
@@ -11,10 +15,11 @@ export function buildStoryContext(workspace: Workspace, chapterId?: string) {
     `核心构想：${workspace.project.premise || "未设定"}`,
     `写作规则：${workspace.project.styleGuide || "未设定"}`,
     `\n大纲：\n${workspace.outline.map((n) => `- [${n.type}] ${n.title}：${n.summary}`).join("\n")}`,
-    `\n人物：\n${workspace.characters.map((c) => `- ${c.name}（${c.role}）：目标=${c.goal}；恐惧=${c.fear}；秘密=${c.secret}；口吻=${c.voice}`).join("\n")}`,
+    `\n人物：\n${workspace.characters.map((c) => `- ${c.name}（${c.role}）：个性与经历=${c.description}；目标=${c.goal}；恐惧=${c.fear}；秘密=${c.secret}；口吻=${c.voice}`).join("\n")}`,
     `\n人物关系：\n${workspace.relationships.map((r) => `- ${r.sourceName} → ${r.targetName}：${r.type}。${r.description}`).join("\n")}`,
     `\n硬设定：\n${workspace.worldEntries.filter((w) => w.isCanon).map((w) => `- [${w.category}] ${w.name}：${w.description}`).join("\n")}`,
-    `\n事件链：\n${workspace.events.map((e) => `- ${e.storyTime} ${e.title}；原因：${e.causes}；结果：${e.consequences}`).join("\n")}`,
+    `\n事件链：\n${workspace.events.map((e) => `- ${e.storyTime} ${e.title}${e.chapterTitle ? `（${e.chapterTitle}）` : ""}：${e.description}；原因：${e.causes}；结果：${e.consequences}`).join("\n")}`,
+    `\n当前章节场景：\n${chapterScenes.length ? chapterScenes.map((scene) => `- ${scene.title}：${scene.summary}`).join("\n") : "未单独拆分场景"}`,
     `\n插画说明：\n${workspace.illustrations.map((image) => `- ${workspace.chapters.find((chapter) => chapter.id === image.chapterId)?.title || "章节"}：${image.caption || image.fileName}`).join("\n")}`,
     `\n相关章节：\n${nearby.map((c) => `### ${c.title}\n摘要：${c.summary}\n${c.content.slice(-5000)}`).join("\n\n")}`,
   ].join("\n");

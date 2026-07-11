@@ -13,11 +13,31 @@ export const outlineProposalSchema = z.object({
   })).min(1).max(30),
 });
 
+export const volumeExpansionSchema = z.object({
+  rationale: z.string(),
+  nodes: z.array(z.object({
+    type: z.enum(["chapter", "scene"]),
+    title: z.string(),
+    summary: z.string(),
+  })).min(1).max(30),
+});
+
 export const outlineNodeProposalSchema = z.object({
   rationale: z.string(),
   title: z.string(),
   summary: z.string(),
 });
+
+const volumeLikeTitle = /^第[0-9一二三四五六七八九十百]+卷(?:[：:\s]|$)/;
+
+function normalizeOverallVolumes(proposal: z.infer<typeof outlineProposalSchema>) {
+  return {
+    ...proposal,
+    nodes: proposal.nodes.map((node) => node.type === "chapter" && volumeLikeTitle.test(node.title)
+      ? { ...node, type: "volume" as const }
+      : node),
+  };
+}
 
 function clientFor(settings: ModelSettings) {
   if (settings.provider === "openai") {
@@ -59,12 +79,32 @@ export async function generateOutline(settings: ModelSettings, context: string, 
       text: { format: zodTextFormat(outlineProposalSchema, "outline_proposal") },
     });
     if (!response.output_parsed) throw new Error("模型没有返回可解析的大纲");
-    return response.output_parsed;
+    return normalizeOverallVolumes(response.output_parsed);
   }
   const raw = await generateText(settings, `${system} 必须只返回 JSON，格式为 {"rationale":"...","nodes":[{"type":"chapter","title":"...","summary":"..."}]}`, `${context}\n\n用户要求：${instruction}`);
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("本地模型没有返回 JSON 大纲");
-  return outlineProposalSchema.parse(JSON.parse(match[0]));
+  return normalizeOverallVolumes(outlineProposalSchema.parse(JSON.parse(match[0])));
+}
+
+export async function generateVolumeExpansion(settings: ModelSettings, context: string, currentVolume: string, instruction: string) {
+  const client = clientFor(settings);
+  const system = "你是长篇小说分卷策划编辑。把用户指定的一卷细化为可写作的章和场景，严格尊重全书人物、关系、硬设定和事件因果。只规划这一卷，不修改其他卷，不写正文。每个场景必须紧跟在所属章之后。";
+  const input = `${context}\n\n待展开的卷：\n${currentVolume}\n\n用户要求：${instruction}`;
+  if (settings.provider === "openai") {
+    const response = await client.responses.parse({
+      model: settings.model || process.env.OPENAI_MODEL || "gpt-5.4-mini",
+      instructions: system,
+      input,
+      text: { format: zodTextFormat(volumeExpansionSchema, "volume_expansion") },
+    });
+    if (!response.output_parsed) throw new Error("模型没有返回可解析的分卷章节");
+    return response.output_parsed;
+  }
+  const raw = await generateText(settings, `${system} 必须只返回 JSON，格式为 {"rationale":"...","nodes":[{"type":"chapter","title":"...","summary":"..."},{"type":"scene","title":"...","summary":"..."}]}`, input);
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("本地模型没有返回 JSON 分卷章节");
+  return volumeExpansionSchema.parse(JSON.parse(match[0]));
 }
 
 export async function generateOutlineNode(settings: ModelSettings, context: string, currentNode: string, instruction: string) {
