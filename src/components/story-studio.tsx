@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import {
-  AlertTriangle, BookOpen, Bot, BrainCircuit, Check, ChevronRight, CirclePlus, Clock3,
+  AlertTriangle, BookOpen, Bot, BrainCircuit, Check, ChevronDown, ChevronRight, CirclePlus, Clock3,
   Download, FileText, FileType2, GitBranch, History, ImagePlus, LoaderCircle,
   Network, Printer, Save, Search, Settings, Sparkles, Users, WandSparkles, X,
 } from "lucide-react";
@@ -86,6 +86,8 @@ export function StoryStudio() {
   const [aiError, setAiError] = useState("");
   const [logicQuery, setLogicQuery] = useState("");
   const [logicAnswer, setLogicAnswer] = useState("");
+  const [collapsedWritingVolumes, setCollapsedWritingVolumes] = useState<Set<string>>(() => new Set());
+  const [collapsedOutlineVolumes, setCollapsedOutlineVolumes] = useState<Set<string>>(() => new Set());
 
   const loadWorkspace = useCallback(async (projectId?: string, preferredOutlineId?: string) => {
     setBusy(true);
@@ -372,7 +374,7 @@ export function StoryStudio() {
             <aside className="chapter-list panel-subtle">
               <div className="section-heading"><div><span className="eyebrow">MANUSCRIPT</span><h2>章节</h2></div><button className="tiny-button" onClick={async () => { const title = window.prompt("新章节标题", `第${workspace.chapters.length + 1}章`); if (title) { const newId = await mutate("create-chapter", { projectId: workspace.project.id, title }); if (newId) setSelectedChapterId(newId); } }}><CirclePlus size={16} /></button></div>
               <div className="chapter-items">
-                {workspace.chapters.map((chapter) => <button key={chapter.id} className={chapter.id === selectedChapterId ? "chapter-item selected" : "chapter-item"} onClick={() => selectChapter(chapter)}><span>{String(chapter.position + 1).padStart(2, "0")}</span><div><strong>{chapter.title}</strong><small>{chapter.outlineStale ? "⚠ 大纲已更新 · " : ""}{chapter.wordCount} 字 · {chapter.status}</small></div><ChevronRight size={15} /></button>)}
+                <ManuscriptTree workspace={workspace} selectedChapterId={selectedChapterId} collapsedVolumes={collapsedWritingVolumes} onToggleVolume={(volumeId) => setCollapsedWritingVolumes((current) => toggleSetValue(current, volumeId))} onSelectChapter={selectChapter} />
               </div>
               <div className="manuscript-total"><span>全书字数</span><strong>{workspace.chapters.reduce((sum, item) => sum + item.wordCount, 0).toLocaleString()}</strong></div>
             </aside>
@@ -409,7 +411,7 @@ export function StoryStudio() {
             <div className="outline-grid">
               <div className="outline-tree">
                 <div className="outline-tree-header"><div><span className="eyebrow">OUTLINE TREE</span><strong>卷 · 章 · 场景</strong></div><button className="secondary-button" onClick={() => setNodeCreateDraft({ type: "volume", parentId: null, afterId: workspace.outline.at(-1)?.id || null, title: `第${workspace.outline.filter((node) => node.type === "volume").length + 1}卷`, summary: "", heading: "添加新卷" })}><CirclePlus size={15} />添加卷</button></div>
-                {workspace.outline.map((node) => <button key={node.id} className={`outline-node depth-${node.type}${node.id === selectedOutlineId ? " selected" : ""}`} onClick={() => { setSelectedOutlineId(node.id); setOutlineDraft({ ...node }); setProposal(null); setOutlineAiInstruction(""); }}><span className={`node-type ${node.type}`}>{node.type === "volume" ? "卷" : node.type === "chapter" ? "章" : "场"}</span><div><h3>{node.title}</h3><p>{node.summary || "尚未填写摘要"}</p></div><span className="status-pill">v{node.revision} · {node.status}</span></button>)}
+                <OutlineTreeRows nodes={workspace.outline} selectedId={selectedOutlineId} collapsedVolumes={collapsedOutlineVolumes} onToggleVolume={(volumeId) => setCollapsedOutlineVolumes((current) => toggleSetValue(current, volumeId))} onSelect={(node) => { setSelectedOutlineId(node.id); setOutlineDraft({ ...node }); setProposal(null); setOutlineAiInstruction(""); }} />
               </div>
               <div className="outline-side">{outlineDraft && <><div className="detail-editor outline-editor"><div className="section-heading"><div><span className="eyebrow">SELECTED NODE</span><h2>{isVolumeLikeNode(outlineDraft) ? "卷" : outlineDraft.type === "chapter" ? "章" : "场景"}节点</h2></div><button className="primary-button small" onClick={async () => { await mutate("save-outline-node", outlineDraft as unknown as Record<string, unknown>); setMessage("大纲节点已保存；关联正文已按需标记"); }}><Save size={15} />保存</button></div><Field label="标题" value={outlineDraft.title} onChange={(title) => setOutlineDraft({ ...outlineDraft, title })} /><Field label="剧情摘要 / 本节点要完成的任务" value={outlineDraft.summary} multiline onChange={(summary) => setOutlineDraft({ ...outlineDraft, summary })} /><Field label="状态" value={outlineDraft.status} options={[{ label: "计划中", value: "planned" }, { label: "已起草", value: "drafted" }, { label: "已完成", value: "complete" }]} onChange={(status) => setOutlineDraft({ ...outlineDraft, status })} />{outlineDraft.type === "chapter" && !isVolumeLikeNode(outlineDraft) && (() => { const linked = workspace.chapters.find((chapter) => chapter.outlineNodeId === outlineDraft.id); return linked ? <button className="secondary-button full-action" onClick={() => selectChapter(linked)}><FileText size={15} />进入本章写作{linked.outlineStale ? "（待同步）" : ""}</button> : null; })()}<div className="outline-structure-actions">{isVolumeLikeNode(outlineDraft) && <button className="ai-structure-action" onClick={() => { setAiAction("outline-volume"); setVolumeChapterCount(7); setAiInstruction(`根据以下本卷介绍展开章节：\n${outlineDraft.summary.trim() || outlineDraft.title}\n\n要求：每一章都要提供明确的章节标题和章节介绍，形成连续推进的剧情，不要重复其他卷。`); setProposal(null); setAiError(""); setOverallOutlineOpen(true); }}><Sparkles size={14} />AI 展开为章节</button>}{outlineDraft.type === "volume" && <><button onClick={() => setNodeCreateDraft({ type: "chapter", parentId: outlineDraft.id, afterId: outlineDraft.id, title: "新章", summary: "", heading: `在《${outlineDraft.title}》中添加章节` })}><CirclePlus size={14} />本卷添加章</button><button onClick={() => setNodeCreateDraft({ type: "volume", parentId: null, afterId: outlineDraft.id, title: "新卷", summary: "", heading: `在《${outlineDraft.title}》后插入新卷` })}><CirclePlus size={14} />后插新卷</button></>}{outlineDraft.type === "chapter" && !isVolumeLikeNode(outlineDraft) && <><button onClick={() => setNodeCreateDraft({ type: "scene", parentId: outlineDraft.id, afterId: outlineDraft.id, title: "新场景", summary: "", heading: `在《${outlineDraft.title}》中添加场景` })}><CirclePlus size={14} />本章添加场景</button><button onClick={() => setNodeCreateDraft({ type: "chapter", parentId: outlineDraft.parentId, afterId: outlineDraft.id, title: "新章", summary: "", heading: `在《${outlineDraft.title}》后插入新章` })}><CirclePlus size={14} />后插新章</button></>}{outlineDraft.type === "scene" && <button onClick={() => setNodeCreateDraft({ type: "scene", parentId: outlineDraft.parentId, afterId: outlineDraft.id, title: "新场景", summary: "", heading: `在《${outlineDraft.title}》后插入场景` })}><CirclePlus size={14} />后插场景</button>}<button className="danger-text-button" onClick={() => setDeleteOutlineOpen(true)}>删除此{isVolumeLikeNode(outlineDraft) ? "卷" : outlineDraft.type === "chapter" ? "章" : "场景"}</button></div></div><div className="inline-ai-card node-ai-card"><Sparkles size={20} /><h3>AI 单独修改这个节点</h3><p>只修改当前节点，不会改动其他卷、章或场景。</p><textarea value={outlineAiInstruction} onChange={(e) => setOutlineAiInstruction(e.target.value)} placeholder="例如：保留结局不变，但让本章中点出现一次更强的错误判断……" /><button className="primary-button full" onClick={() => void callAi("outline-node")} disabled={busy || !outlineAiInstruction.trim()}>生成节点修改提案</button>{proposal?.type === "outline-node" && <ProposalCard proposal={proposal} onApply={() => void applyProposal()} onClose={() => setProposal(null)} />}</div></>}</div>
             </div>
@@ -459,6 +461,65 @@ export function StoryStudio() {
 
 function ContentPage({ eyebrow, title, description, action, children }: { eyebrow: string; title: string; description: string; action?: React.ReactNode; children: React.ReactNode }) {
   return <div className="content-page"><header className="page-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{action}</header>{children}</div>;
+}
+
+function toggleSetValue(current: Set<string>, value: string) {
+  const next = new Set(current);
+  if (next.has(value)) next.delete(value); else next.add(value);
+  return next;
+}
+
+function ManuscriptTree({ workspace, selectedChapterId, collapsedVolumes, onToggleVolume, onSelectChapter }: {
+  workspace: Workspace;
+  selectedChapterId: string;
+  collapsedVolumes: Set<string>;
+  onToggleVolume: (volumeId: string) => void;
+  onSelectChapter: (chapter: Chapter) => void;
+}) {
+  const nodesById = new Map(workspace.outline.map((node) => [node.id, node]));
+  const volumes = workspace.outline.filter((node) => node.type === "volume");
+  const grouped = new Map(volumes.map((volume) => [volume.id, [] as Chapter[]]));
+  const unfiled: Chapter[] = [];
+  workspace.chapters.forEach((chapter) => {
+    let node = chapter.outlineNodeId ? nodesById.get(chapter.outlineNodeId) : undefined;
+    while (node && node.type !== "volume" && node.parentId) node = nodesById.get(node.parentId);
+    if (node?.type === "volume" && grouped.has(node.id)) grouped.get(node.id)?.push(chapter); else unfiled.push(chapter);
+  });
+  return <>{volumes.map((volume) => {
+    const chapters = grouped.get(volume.id) || [];
+    const collapsed = collapsedVolumes.has(volume.id);
+    const active = chapters.some((chapter) => chapter.id === selectedChapterId);
+    return <div className="manuscript-volume" key={volume.id}><button className={active ? "manuscript-volume-toggle active" : "manuscript-volume-toggle"} aria-expanded={!collapsed} onClick={() => onToggleVolume(volume.id)}>{collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}<div><strong>{volume.title}</strong><small>{chapters.length} 章 · {chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0).toLocaleString()} 字</small></div></button>{!collapsed && <div className="manuscript-volume-children">{chapters.length ? chapters.map((chapter) => <ChapterTreeItem key={chapter.id} chapter={chapter} selected={chapter.id === selectedChapterId} onSelect={() => onSelectChapter(chapter)} />) : <span className="tree-empty">本卷还没有章节</span>}</div>}</div>;
+  })}{unfiled.length > 0 && <div className="manuscript-volume unfiled"><div className="manuscript-volume-label"><FileText size={14} /><strong>未归档章节</strong></div><div className="manuscript-volume-children">{unfiled.map((chapter) => <ChapterTreeItem key={chapter.id} chapter={chapter} selected={chapter.id === selectedChapterId} onSelect={() => onSelectChapter(chapter)} />)}</div></div>}</>;
+}
+
+function ChapterTreeItem({ chapter, selected, onSelect }: { chapter: Chapter; selected: boolean; onSelect: () => void }) {
+  return <button className={selected ? "chapter-item selected" : "chapter-item"} onClick={onSelect}><span>{String(chapter.position + 1).padStart(2, "0")}</span><div><strong>{chapter.title}</strong><small>{chapter.outlineStale ? "⚠ 大纲已更新 · " : ""}{chapter.wordCount} 字 · {chapter.status}</small></div><ChevronRight size={15} /></button>;
+}
+
+function OutlineTreeRows({ nodes, selectedId, collapsedVolumes, onToggleVolume, onSelect }: {
+  nodes: Workspace["outline"];
+  selectedId: string;
+  collapsedVolumes: Set<string>;
+  onToggleVolume: (volumeId: string) => void;
+  onSelect: (node: Workspace["outline"][number]) => void;
+}) {
+  const ids = new Set(nodes.map((node) => node.id));
+  const roots = nodes.filter((node) => !node.parentId || !ids.has(node.parentId));
+  return <>{roots.map((node) => <OutlineTreeBranch key={node.id} node={node} nodes={nodes} selectedId={selectedId} collapsedVolumes={collapsedVolumes} onToggleVolume={onToggleVolume} onSelect={onSelect} />)}</>;
+}
+
+function OutlineTreeBranch({ node, nodes, selectedId, collapsedVolumes, onToggleVolume, onSelect }: {
+  node: Workspace["outline"][number];
+  nodes: Workspace["outline"];
+  selectedId: string;
+  collapsedVolumes: Set<string>;
+  onToggleVolume: (volumeId: string) => void;
+  onSelect: (node: Workspace["outline"][number]) => void;
+}) {
+  const children = nodes.filter((item) => item.parentId === node.id);
+  const collapsed = node.type === "volume" && collapsedVolumes.has(node.id);
+  return <div className={`outline-branch depth-${node.type}`}><div className="outline-tree-row">{node.type === "volume" ? <button className="tree-toggle" title={collapsed ? "展开本卷" : "收起本卷"} aria-label={`${collapsed ? "展开" : "收起"}《${node.title}》`} aria-expanded={!collapsed} onClick={() => onToggleVolume(node.id)}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</button> : <span className="tree-guide" />}<button className={`outline-node${node.id === selectedId ? " selected" : ""}`} onClick={() => onSelect(node)}><span className={`node-type ${node.type}`}>{node.type === "volume" ? "卷" : node.type === "chapter" ? "章" : "场"}</span><div><h3>{node.title}</h3><p>{node.summary || "尚未填写摘要"}</p></div><span className="status-pill">v{node.revision} · {node.status}</span></button></div>{!collapsed && children.map((child) => <OutlineTreeBranch key={child.id} node={child} nodes={nodes} selectedId={selectedId} collapsedVolumes={collapsedVolumes} onToggleVolume={onToggleVolume} onSelect={onSelect} />)}</div>;
 }
 
 function ProposalCard({ proposal, onApply, onClose }: { proposal: AiProposal; onApply: () => void; onClose: () => void }) {
