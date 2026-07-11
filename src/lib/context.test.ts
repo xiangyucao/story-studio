@@ -5,10 +5,10 @@ import type { Workspace } from "./types";
 const workspace: Workspace = {
   projects: [],
   project: { id: "p", title: "测试作品", genre: "悬疑", premise: "寻找失踪者", styleGuide: "限制视角", createdAt: "", updatedAt: "" },
-  outline: [{ id: "o", projectId: "p", parentId: null, type: "chapter", title: "第一章", summary: "收到来信", position: 0, status: "planned" }],
+  outline: [{ id: "o", projectId: "p", parentId: null, type: "chapter", title: "第一章", summary: "收到来信", position: 0, status: "planned", revision: 1 }],
   chapters: [
-    { id: "c1", projectId: "p", outlineNodeId: null, title: "第一章", content: "旧内容", summary: "收到信", status: "draft", position: 0, wordCount: 3, updatedAt: "" },
-    { id: "c2", projectId: "p", outlineNodeId: null, title: "第二章", content: "当前内容", summary: "找到钥匙", status: "draft", position: 1, wordCount: 4, updatedAt: "" },
+    { id: "c1", projectId: "p", outlineNodeId: null, title: "第一章", content: "旧内容", summary: "收到信", status: "draft", position: 0, wordCount: 3, outlineStale: false, basedOnOutlineRevision: 1, updatedAt: "" },
+    { id: "c2", projectId: "p", outlineNodeId: null, title: "第二章", content: "当前内容", summary: "找到钥匙", status: "draft", position: 1, wordCount: 4, outlineStale: false, basedOnOutlineRevision: 1, updatedAt: "" },
   ],
   characters: [{ id: "a", projectId: "p", name: "林月", role: "主角", description: "记者", goal: "找父亲", fear: "记忆错误", secret: "见过仓库", voice: "短句", status: "active" }],
   relationships: [],

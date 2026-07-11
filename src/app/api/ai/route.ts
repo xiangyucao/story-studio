@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWorkspace } from "@/lib/db";
 import { buildStoryContext } from "@/lib/context";
-import { generateOutline, generateText } from "@/lib/models";
+import { generateOutline, generateOutlineNode, generateText } from "@/lib/models";
 import type { ModelSettings } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -10,7 +10,7 @@ export const maxDuration = 120;
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as {
-      action: "outline" | "expand" | "revise" | "logic";
+      action: "outline" | "outline-node" | "expand" | "revise" | "logic";
       projectId: string;
       chapterId?: string;
       instruction: string;
@@ -22,6 +22,9 @@ export async function POST(request: NextRequest) {
     const context = buildStoryContext(workspace, body.chapterId);
     if (body.action === "outline") {
       return NextResponse.json({ type: "outline", proposal: await generateOutline(body.settings, context, body.instruction) });
+    }
+    if (body.action === "outline-node") {
+      return NextResponse.json({ type: "outline-node", proposal: await generateOutlineNode(body.settings, context, body.selection || "", body.instruction) });
     }
     const task = body.action === "expand"
       ? "根据资料展开当前章节。只输出可直接进入正文的中文文本，不解释过程。"

@@ -13,6 +13,12 @@ export const outlineProposalSchema = z.object({
   })).min(1).max(30),
 });
 
+export const outlineNodeProposalSchema = z.object({
+  rationale: z.string(),
+  title: z.string(),
+  summary: z.string(),
+});
+
 function clientFor(settings: ModelSettings) {
   if (settings.provider === "openai") {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -59,4 +65,24 @@ export async function generateOutline(settings: ModelSettings, context: string, 
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("本地模型没有返回 JSON 大纲");
   return outlineProposalSchema.parse(JSON.parse(match[0]));
+}
+
+export async function generateOutlineNode(settings: ModelSettings, context: string, currentNode: string, instruction: string) {
+  const client = clientFor(settings);
+  const system = "你是长篇小说结构编辑。只修改用户指定的一个大纲节点，尊重全书已有硬设定、人物动机和因果链。不要扩写正文，也不要修改其他节点。";
+  const input = `${context}\n\n当前节点：\n${currentNode}\n\n用户修改要求：${instruction}`;
+  if (settings.provider === "openai") {
+    const response = await client.responses.parse({
+      model: settings.model || process.env.OPENAI_MODEL || "gpt-5.4-mini",
+      instructions: system,
+      input,
+      text: { format: zodTextFormat(outlineNodeProposalSchema, "outline_node_proposal") },
+    });
+    if (!response.output_parsed) throw new Error("模型没有返回可解析的节点提案");
+    return response.output_parsed;
+  }
+  const raw = await generateText(settings, `${system} 必须只返回 JSON，格式为 {"rationale":"...","title":"...","summary":"..."}`, input);
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("本地模型没有返回 JSON 节点提案");
+  return outlineNodeProposalSchema.parse(JSON.parse(match[0]));
 }

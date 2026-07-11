@@ -17,6 +17,7 @@ export type OutlineNode = {
   summary: string;
   position: number;
   status: string;
+  revision: number;
 };
 
 export type Chapter = {
@@ -29,6 +30,8 @@ export type Chapter = {
   status: string;
   position: number;
   wordCount: number;
+  outlineStale: boolean;
+  basedOnOutlineRevision: number;
   updatedAt: string;
 };
 

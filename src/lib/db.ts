@@ -47,7 +47,8 @@ db.exec(`
     title TEXT NOT NULL,
     summary TEXT NOT NULL DEFAULT '',
     position INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'planned'
+    status TEXT NOT NULL DEFAULT 'planned',
+    revision INTEGER NOT NULL DEFAULT 1
   );
   CREATE TABLE IF NOT EXISTS chapters (
     id TEXT PRIMARY KEY,
@@ -59,6 +60,8 @@ db.exec(`
     status TEXT NOT NULL DEFAULT 'draft',
     position INTEGER NOT NULL DEFAULT 0,
     word_count INTEGER NOT NULL DEFAULT 0,
+    outline_stale INTEGER NOT NULL DEFAULT 0,
+    based_on_outline_revision INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS characters (
@@ -125,6 +128,29 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_events_project ON story_events(project_id);
 `);
 
+function ensureColumn(table: string, column: string, definition: string) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((item) => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+ensureColumn("outline_nodes", "revision", "INTEGER NOT NULL DEFAULT 1");
+ensureColumn("chapters", "outline_stale", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("chapters", "based_on_outline_revision", "INTEGER NOT NULL DEFAULT 0");
+db.exec(`
+  UPDATE chapters
+  SET outline_node_id = (
+    SELECT id FROM outline_nodes
+    WHERE outline_nodes.project_id = chapters.project_id
+      AND outline_nodes.type = 'chapter'
+      AND outline_nodes.title = chapters.title
+    LIMIT 1
+  )
+  WHERE outline_node_id IS NULL;
+  UPDATE chapters
+  SET based_on_outline_revision = COALESCE((SELECT revision FROM outline_nodes WHERE id = chapters.outline_node_id), 0)
+  WHERE outline_node_id IS NOT NULL AND based_on_outline_revision = 0;
+`);
+
 type Row = Record<string, unknown>;
 const now = () => new Date().toISOString();
 const id = () => randomUUID();
@@ -152,12 +178,12 @@ function seedIfEmpty() {
       "离乡十年的林月收到失踪父亲寄出的信，回到终年起雾的海港寻找真相。",
       "克制、具象；避免全知视角；重要揭示必须有前置伏笔。", created, created,
     );
-    const addOutline = db.prepare("INSERT INTO outline_nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    const addOutline = db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)");
     const volume = id();
     addOutline.run(volume, projectId, null, "volume", "第一卷：归港", "回归、试探与第一条无法解释的线索。", 0, "planned");
     addOutline.run(id(), projectId, volume, "chapter", "第一章：迟到十年的信", "林月收到父亲刚刚寄出的信。", 0, "drafted");
     addOutline.run(id(), projectId, volume, "chapter", "第二章：仓库钥匙", "陈叔交出一把来历不明的旧钥匙。", 1, "planned");
-    const addChapter = db.prepare("INSERT INTO chapters VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    const addChapter = db.prepare("INSERT INTO chapters (id, project_id, outline_node_id, title, content, summary, status, position, word_count, outline_stale, based_on_outline_revision, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?)");
     const content = "雨从凌晨一直落到傍晚。\n\n林月拆开那封信时，先看见了信封右下角晕开的蓝墨水。那是父亲的字。十年前，他也是用同样的墨水写下最后一张便条：出去一趟。\n\n邮戳却是昨天。";
     addChapter.run(chapter1, projectId, null, "第一章：迟到十年的信", content, "林月收到不可能来自父亲的信。", "draft", 0, content.length, created);
     addChapter.run(chapter2, projectId, null, "第二章：仓库钥匙", "", "林月回到雾港，陈叔交给她仓库钥匙。", "planned", 1, 0, created);
@@ -185,12 +211,13 @@ export function getWorkspace(projectId?: string): Workspace {
   if (!project) throw new Error("没有可用项目");
   const outline = (db.prepare("SELECT * FROM outline_nodes WHERE project_id = ? ORDER BY position, rowid").all(project.id) as Row[]).map((r): OutlineNode => ({
     id: String(r.id), projectId: String(r.project_id), parentId: r.parent_id ? String(r.parent_id) : null,
-    type: r.type as OutlineNode["type"], title: String(r.title), summary: String(r.summary), position: Number(r.position), status: String(r.status),
+    type: r.type as OutlineNode["type"], title: String(r.title), summary: String(r.summary), position: Number(r.position), status: String(r.status), revision: Number(r.revision),
   }));
   const chapters = (db.prepare("SELECT * FROM chapters WHERE project_id = ? ORDER BY position, rowid").all(project.id) as Row[]).map((r): Chapter => ({
     id: String(r.id), projectId: String(r.project_id), outlineNodeId: r.outline_node_id ? String(r.outline_node_id) : null,
     title: String(r.title), content: String(r.content), summary: String(r.summary), status: String(r.status),
-    position: Number(r.position), wordCount: Number(r.word_count), updatedAt: String(r.updated_at),
+    position: Number(r.position), wordCount: Number(r.word_count), outlineStale: Boolean(r.outline_stale),
+    basedOnOutlineRevision: Number(r.based_on_outline_revision), updatedAt: String(r.updated_at),
   }));
   const characters = (db.prepare("SELECT * FROM characters WHERE project_id = ? ORDER BY rowid").all(project.id) as Row[]).map((r): Character => ({
     id: String(r.id), projectId: String(r.project_id), name: String(r.name), role: String(r.role), description: String(r.description),
@@ -228,8 +255,8 @@ export function createProject(title: string) {
   db.transaction(() => {
     db.prepare("INSERT INTO projects VALUES (?, ?, '', '', '', ?, ?)").run(projectId, title || "未命名作品", timestamp, timestamp);
     const outlineId = id();
-    db.prepare("INSERT INTO outline_nodes VALUES (?, ?, NULL, 'chapter', '第一章', '', 0, 'planned')").run(outlineId, projectId);
-    db.prepare("INSERT INTO chapters VALUES (?, ?, ?, '第一章', '', '', 'draft', 0, 0, ?)").run(id(), projectId, outlineId, timestamp);
+    db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, NULL, 'chapter', '第一章', '', 0, 'planned', 1)").run(outlineId, projectId);
+    db.prepare("INSERT INTO chapters (id, project_id, outline_node_id, title, content, summary, status, position, word_count, outline_stale, based_on_outline_revision, updated_at) VALUES (?, ?, ?, '第一章', '', '', 'draft', 0, 0, 0, 1, ?)").run(id(), projectId, outlineId, timestamp);
   })();
   return projectId;
 }
@@ -256,13 +283,21 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
     case "create-chapter": {
       const chapterId = id();
       const max = db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM chapters WHERE project_id=?").get(payload.projectId) as { p: number };
-      db.prepare("INSERT INTO chapters VALUES (?, ?, NULL, ?, '', '', 'draft', ?, 0, ?)").run(chapterId, payload.projectId, payload.title || "新章节", max.p + 1, timestamp);
+      const outlineId = id();
+      const title = payload.title || "新章节";
+      db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, NULL, 'chapter', ?, '', ?, 'planned', 1)").run(outlineId, payload.projectId, title, max.p + 1);
+      db.prepare("INSERT INTO chapters (id, project_id, outline_node_id, title, content, summary, status, position, word_count, outline_stale, based_on_outline_revision, updated_at) VALUES (?, ?, ?, ?, '', '', 'draft', ?, 0, 0, 1, ?)").run(chapterId, payload.projectId, outlineId, title, max.p + 1, timestamp);
       return chapterId;
     }
     case "save-chapter": {
       const previous = db.prepare("SELECT content, project_id FROM chapters WHERE id=?").get(payload.id) as { content: string; project_id: string };
       const content = String(payload.content ?? "");
       db.prepare("UPDATE chapters SET title=?, content=?, summary=?, status=?, word_count=?, updated_at=? WHERE id=?").run(payload.title, content, payload.summary ?? "", payload.status ?? "draft", content.replace(/\s/g, "").length, timestamp, payload.id);
+      if (payload.clearOutlineStale) {
+        db.prepare(`UPDATE chapters SET outline_stale=0, based_on_outline_revision=COALESCE(
+          (SELECT revision FROM outline_nodes WHERE id=chapters.outline_node_id), based_on_outline_revision
+        ) WHERE id=?`).run(payload.id);
+      }
       if (payload.instruction && previous && previous.content !== content) {
         db.prepare("INSERT INTO revisions VALUES (?, ?, 'chapter', ?, ?, ?, ?, ?)").run(id(), previous.project_id, payload.id, previous.content, content, payload.instruction, timestamp);
       }
@@ -291,11 +326,47 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
       db.prepare("INSERT INTO relationships VALUES (?, ?, ?, ?, ?, ?)").run(relationId, payload.projectId, payload.sourceCharacterId, payload.targetCharacterId, payload.type || "关系", payload.description || "");
       return relationId;
     }
+    case "save-outline-node": {
+      const previous = db.prepare("SELECT title, summary, status FROM outline_nodes WHERE id=?").get(payload.id) as { title: string; summary: string; status: string } | undefined;
+      if (!previous) throw new Error("大纲节点不存在");
+      const changed = previous.title !== payload.title || previous.summary !== payload.summary || previous.status !== payload.status;
+      const storyChanged = previous.title !== payload.title || previous.summary !== payload.summary;
+      if (changed) {
+        db.prepare("UPDATE outline_nodes SET title=?, summary=?, status=?, revision=revision+1 WHERE id=?").run(payload.title, payload.summary, payload.status, payload.id);
+        if (storyChanged) db.prepare("UPDATE chapters SET title=?, outline_stale=CASE WHEN TRIM(content)<>'' THEN 1 ELSE 0 END WHERE outline_node_id=?").run(payload.title, payload.id);
+      }
+      return payload.id;
+    }
+    case "mark-chapter-current":
+      db.prepare(`UPDATE chapters SET outline_stale=0, based_on_outline_revision=COALESCE(
+        (SELECT revision FROM outline_nodes WHERE id=chapters.outline_node_id), based_on_outline_revision
+      ) WHERE id=?`).run(payload.id);
+      return payload.id;
     case "apply-outline": {
       const nodes = Array.isArray(payload.nodes) ? payload.nodes as Array<Record<string, unknown>> : [];
-      const insert = db.prepare("INSERT INTO outline_nodes VALUES (?, ?, NULL, ?, ?, ?, ?, 'planned')");
+      const insert = db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, ?, ?, ?, ?, ?, 'planned', 1)");
+      const insertChapter = db.prepare("INSERT INTO chapters (id, project_id, outline_node_id, title, content, summary, status, position, word_count, outline_stale, based_on_outline_revision, updated_at) VALUES (?, ?, ?, ?, '', ?, 'draft', ?, 0, 0, 1, ?)");
       const max = db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM outline_nodes WHERE project_id=?").get(payload.projectId) as { p: number };
-      db.transaction(() => nodes.forEach((node, index) => insert.run(id(), payload.projectId, node.type || "chapter", node.title || `节点 ${index + 1}`, node.summary || "", max.p + index + 1)))();
+      const chapterMax = db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM chapters WHERE project_id=?").get(payload.projectId) as { p: number };
+      db.transaction(() => {
+        let volumeId: string | null = null;
+        let chapterOutlineId: string | null = null;
+        let chapterOffset = 0;
+        nodes.forEach((node, index) => {
+          const nodeType = String(node.type || "chapter") as OutlineNode["type"];
+          const nodeId = id();
+          const parentId = nodeType === "volume" ? null : nodeType === "chapter" ? volumeId : chapterOutlineId || volumeId;
+          const title = String(node.title || `节点 ${index + 1}`);
+          const summary = String(node.summary || "");
+          insert.run(nodeId, payload.projectId, parentId, nodeType, title, summary, max.p + index + 1);
+          if (nodeType === "volume") volumeId = nodeId;
+          if (nodeType === "chapter") {
+            chapterOutlineId = nodeId;
+            insertChapter.run(id(), payload.projectId, nodeId, title, summary, chapterMax.p + chapterOffset + 1, timestamp);
+            chapterOffset += 1;
+          }
+        });
+      })();
       return payload.projectId;
     }
     default:
