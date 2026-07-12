@@ -276,6 +276,48 @@ export function createProject(title: string) {
   return projectId;
 }
 
+export function cloneProjectForRewrite(sourceProjectId: string, requestedTitle?: string) {
+  const source = db.prepare("SELECT * FROM projects WHERE id=?").get(sourceProjectId) as Row | undefined;
+  if (!source) throw new Error("要克隆的作品不存在");
+  const projectId = id();
+  const timestamp = now();
+  const outlineRows = db.prepare("SELECT * FROM outline_nodes WHERE project_id=? ORDER BY position, rowid").all(sourceProjectId) as Row[];
+  const chapterRows = db.prepare("SELECT * FROM chapters WHERE project_id=? ORDER BY position, rowid").all(sourceProjectId) as Row[];
+  const characterRows = db.prepare("SELECT * FROM characters WHERE project_id=? ORDER BY rowid").all(sourceProjectId) as Row[];
+  const relationshipRows = db.prepare("SELECT * FROM relationships WHERE project_id=? ORDER BY rowid").all(sourceProjectId) as Row[];
+  const worldRows = db.prepare("SELECT * FROM world_entries WHERE project_id=? ORDER BY rowid").all(sourceProjectId) as Row[];
+  const eventRows = db.prepare("SELECT * FROM story_events WHERE project_id=? ORDER BY rowid").all(sourceProjectId) as Row[];
+  const outlineIds = new Map(outlineRows.map((row) => [String(row.id), id()]));
+  const chapterIds = new Map(chapterRows.map((row) => [String(row.id), id()]));
+  const characterIds = new Map(characterRows.map((row) => [String(row.id), id()]));
+  const title = requestedTitle?.trim() || `${String(source.title)}（重写副本）`;
+
+  db.transaction(() => {
+    db.prepare("INSERT INTO projects (id, title, genre, premise, style_guide, reference_title, reference_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      projectId, title, source.genre, source.premise, source.style_guide, source.reference_title, source.reference_text, timestamp, timestamp,
+    );
+    const addOutline = db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    outlineRows.forEach((row) => addOutline.run(
+      outlineIds.get(String(row.id)), projectId, row.parent_id ? outlineIds.get(String(row.parent_id)) : null,
+      row.type, row.title, row.summary, row.position, "planned", row.revision,
+    ));
+    const addChapter = db.prepare("INSERT INTO chapters (id, project_id, outline_node_id, title, content, summary, status, position, word_count, target_word_count, outline_stale, based_on_outline_revision, updated_at) VALUES (?, ?, ?, ?, '', ?, 'draft', ?, 0, ?, 0, ?, ?)");
+    chapterRows.forEach((row) => addChapter.run(
+      chapterIds.get(String(row.id)), projectId, row.outline_node_id ? outlineIds.get(String(row.outline_node_id)) : null,
+      row.title, row.summary, row.position, row.target_word_count, row.based_on_outline_revision, timestamp,
+    ));
+    const addCharacter = db.prepare("INSERT INTO characters (id, project_id, name, role, description, goal, fear, secret, voice, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    characterRows.forEach((row) => addCharacter.run(characterIds.get(String(row.id)), projectId, row.name, row.role, row.description, row.goal, row.fear, row.secret, row.voice, row.status));
+    const addRelationship = db.prepare("INSERT INTO relationships (id, project_id, source_character_id, target_character_id, type, description) VALUES (?, ?, ?, ?, ?, ?)");
+    relationshipRows.forEach((row) => addRelationship.run(id(), projectId, characterIds.get(String(row.source_character_id)), characterIds.get(String(row.target_character_id)), row.type, row.description));
+    const addWorld = db.prepare("INSERT INTO world_entries (id, project_id, category, name, description, is_canon) VALUES (?, ?, ?, ?, ?, ?)");
+    worldRows.forEach((row) => addWorld.run(id(), projectId, row.category, row.name, row.description, row.is_canon));
+    const addEvent = db.prepare("INSERT INTO story_events (id, project_id, chapter_id, title, story_time, description, causes, consequences) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    eventRows.forEach((row) => addEvent.run(id(), projectId, row.chapter_id ? chapterIds.get(String(row.chapter_id)) : null, row.title, row.story_time, row.description, row.causes, row.consequences));
+  })();
+  return projectId;
+}
+
 export function createIllustration(input: { projectId: string; chapterId: string; fileName: string; storedName: string; mimeType: string; caption: string }) {
   const illustrationId = id();
   const max = db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM illustrations WHERE chapter_id=?").get(input.chapterId) as { p: number };
@@ -344,6 +386,8 @@ export function getIllustrationAsset(illustrationId: string) {
 export function mutateWorkspace(action: string, payload: Record<string, unknown>) {
   const timestamp = now();
   switch (action) {
+    case "clone-project":
+      return cloneProjectForRewrite(String(payload.id || ""), String(payload.title || ""));
     case "save-project":
       db.prepare("UPDATE projects SET title=?, genre=?, premise=?, style_guide=?, reference_title=?, reference_text=?, updated_at=? WHERE id=?").run(payload.title, payload.genre, payload.premise, payload.styleGuide, payload.referenceTitle ?? "", payload.referenceText ?? "", timestamp, payload.id);
       return payload.id;

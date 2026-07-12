@@ -3,7 +3,7 @@
 
 import {
   AlertTriangle, BookOpen, Bot, BrainCircuit, Check, ChevronDown, ChevronRight, CirclePlus, Clock3,
-  Download, FileText, FileType2, GitBranch, History, ImagePlus, LoaderCircle,
+  Copy, Download, FileText, FileType2, GitBranch, History, ImagePlus, LoaderCircle,
   Network, Printer, Save, Search, Settings, Sparkles, Trash2, Users, WandSparkles, X,
   Upload,
 } from "lucide-react";
@@ -486,6 +486,24 @@ export function StoryStudio() {
     setMessage(`《${workspace.project.title}》已删除`);
   };
 
+  const cloneCurrentProject = async () => {
+    if (!workspace) return;
+    const title = window.prompt("新作品名称", `${workspace.project.title}（重写副本）`)?.trim();
+    if (!title) return;
+    const newProjectId = await mutate("clone-project", { id: workspace.project.id, title }, false);
+    if (!newProjectId) return;
+    setSelectedChapterId("");
+    setSelectedCharacterId("");
+    setSelectedRelationshipId("");
+    setSelectedOutlineId("");
+    setSelectedWorldId("");
+    setSelectedEventId("");
+    setProposal(null);
+    await loadWorkspace(newProjectId);
+    setActiveTab("write");
+    setMessage(`已克隆为《${title}》；卷章结构和设定已保留，所有章节正文均为空`);
+  };
+
   const uploadIllustration = async (file: File) => {
     if (!workspace || !chapterDraft) return;
     const form = new FormData();
@@ -717,7 +735,7 @@ export function StoryStudio() {
           <span className="eyebrow">当前作品</span>
           <div className="project-select-row"><select value={workspace.project.id} onChange={(event) => void loadWorkspace(event.target.value)}>
             {workspace.projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
-          </select><button className="tiny-button" title="新建作品" onClick={() => { setNewProjectTitle(""); setNewProjectOpen(true); }}><CirclePlus size={16} /></button><button className="tiny-button project-delete-button" title={workspace.projects.length <= 1 ? "至少保留一个作品" : `删除《${workspace.project.title}》`} disabled={workspace.projects.length <= 1 || busy} onClick={() => void deleteCurrentProject()}><Trash2 size={15} /></button></div>
+          </select><button className="tiny-button" title="新建作品" onClick={() => { setNewProjectTitle(""); setNewProjectOpen(true); }}><CirclePlus size={16} /></button><button className="tiny-button" title={`克隆《${workspace.project.title}》用于重新写作`} disabled={busy || Boolean(batchWriting?.running)} onClick={() => void cloneCurrentProject()}><Copy size={15} /></button><button className="tiny-button project-delete-button" title={workspace.projects.length <= 1 ? "至少保留一个作品" : `删除《${workspace.project.title}》`} disabled={workspace.projects.length <= 1 || busy} onClick={() => void deleteCurrentProject()}><Trash2 size={15} /></button></div>
         </div>
         <div className="top-actions">
           {message && <span className="status-message">{message}</span>}
