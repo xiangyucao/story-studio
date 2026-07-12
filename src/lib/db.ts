@@ -16,8 +16,8 @@ import type {
   WorldEntry,
 } from "./types";
 import { normalizeCharacterImportData, normalizeCharacterName } from "./character-import";
-import { normalizeWorldEntryName, normalizeWorldImportData } from "./world-import";
-import { normalizeTimelineEventTitle, normalizeTimelineImportData } from "./timeline-import";
+import { normalizeWorldImportData } from "./world-import";
+import { normalizeTimelineImportData } from "./timeline-import";
 import { parseOutlineJson, type OutlineJsonNode } from "./outline-json";
 
 const dataDir = process.env.STORY_STUDIO_DATA_DIR
@@ -496,63 +496,24 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
       if (!projectId) throw new Error("缺少作品编号");
       const imported = normalizeCharacterImportData(payload.data);
       return db.transaction(() => {
-        type CharacterRow = { id: string; name: string; role: string; description: string; goal: string; fear: string; secret: string; voice: string };
-        const rows = db.prepare("SELECT id, name, role, description, goal, fear, secret, voice FROM characters WHERE project_id=?").all(projectId) as CharacterRow[];
-        const charactersByName = new Map(rows.map((row) => [normalizeCharacterName(row.name), row]));
-        let charactersCreated = 0;
-        let charactersUpdated = 0;
-        let relationshipsCreated = 0;
-        let relationshipsUpdated = 0;
-
+        const removedCharacters = (db.prepare("SELECT COUNT(*) AS count FROM characters WHERE project_id=?").get(projectId) as { count: number }).count;
+        const removedRelationships = (db.prepare("SELECT COUNT(*) AS count FROM relationships WHERE project_id=?").get(projectId) as { count: number }).count;
+        db.prepare("DELETE FROM relationships WHERE project_id=?").run(projectId);
+        db.prepare("DELETE FROM characters WHERE project_id=?").run(projectId);
+        const charactersByName = new Map<string, { id: string }>();
         imported.characters.forEach((character) => {
-          const key = normalizeCharacterName(character.name);
-          const existing = charactersByName.get(key);
-          if (existing) {
-            const merged = {
-              name: character.name,
-              role: character.role || existing.role,
-              description: character.description || existing.description,
-              goal: character.goal || existing.goal,
-              fear: character.fear || existing.fear,
-              secret: character.secret || existing.secret,
-              voice: character.voice || existing.voice,
-            };
-            db.prepare("UPDATE characters SET name=?, role=?, description=?, goal=?, fear=?, secret=?, voice=? WHERE id=?").run(
-              merged.name, merged.role, merged.description, merged.goal, merged.fear, merged.secret, merged.voice, existing.id,
-            );
-            const updated = { ...existing, ...merged };
-            charactersByName.set(key, updated);
-            charactersUpdated += 1;
-          } else {
-            const characterId = id();
-            db.prepare("INSERT INTO characters VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')").run(
-              characterId, projectId, character.name, character.role, character.description, character.goal, character.fear, character.secret, character.voice,
-            );
-            charactersByName.set(key, { id: characterId, ...character });
-            charactersCreated += 1;
-          }
+          const characterId = id();
+          db.prepare("INSERT INTO characters VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')").run(characterId, projectId, character.name, character.role, character.description, character.goal, character.fear, character.secret, character.voice);
+          charactersByName.set(normalizeCharacterName(character.name), { id: characterId });
         });
-
         imported.relationships.forEach((relationship) => {
           const source = charactersByName.get(normalizeCharacterName(relationship.sourceName));
           const target = charactersByName.get(normalizeCharacterName(relationship.targetName));
           if (!source || !target) throw new Error(`关系“${relationship.sourceName} → ${relationship.targetName}”中的人物不存在`);
           if (source.id === target.id) throw new Error("一条关系需要两个不同的人物");
-          const existing = db.prepare("SELECT id, description FROM relationships WHERE project_id=? AND source_character_id=? AND target_character_id=? AND type=?").get(
-            projectId, source.id, target.id, relationship.type,
-          ) as { id: string; description: string } | undefined;
-          if (existing) {
-            if (relationship.description) db.prepare("UPDATE relationships SET description=? WHERE id=?").run(relationship.description, existing.id);
-            relationshipsUpdated += 1;
-          } else {
-            db.prepare("INSERT INTO relationships VALUES (?, ?, ?, ?, ?, ?)").run(
-              id(), projectId, source.id, target.id, relationship.type, relationship.description,
-            );
-            relationshipsCreated += 1;
-          }
+          db.prepare("INSERT INTO relationships VALUES (?, ?, ?, ?, ?, ?)").run(id(), projectId, source.id, target.id, relationship.type, relationship.description);
         });
-
-        return `新增 ${charactersCreated} 人，更新 ${charactersUpdated} 人；新增 ${relationshipsCreated} 条关系，更新 ${relationshipsUpdated} 条关系`;
+        return `已用 JSON 全量替换：删除原有 ${removedCharacters} 个人物和 ${removedRelationships} 条关系，导入 ${imported.characters.length} 个人物和 ${imported.relationships.length} 条关系`;
       })();
     }
     case "create-world": {
@@ -573,43 +534,12 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
       if (!projectId) throw new Error("缺少作品编号");
       const imported = normalizeWorldImportData(payload.data);
       return db.transaction(() => {
-        type WorldRow = { id: string; name: string; category: string; description: string; is_canon: number };
-        const rows = db.prepare("SELECT id, name, category, description, is_canon FROM world_entries WHERE project_id=?").all(projectId) as WorldRow[];
-        const entriesByName = new Map(rows.map((row) => [normalizeWorldEntryName(row.name), row]));
-        let created = 0;
-        let updated = 0;
+        const removed = (db.prepare("SELECT COUNT(*) AS count FROM world_entries WHERE project_id=?").get(projectId) as { count: number }).count;
+        db.prepare("DELETE FROM world_entries WHERE project_id=?").run(projectId);
         imported.worldEntries.forEach((entry) => {
-          const key = normalizeWorldEntryName(entry.name);
-          const existing = entriesByName.get(key);
-          if (existing) {
-            const merged = {
-              name: entry.name,
-              category: entry.category || existing.category,
-              description: entry.description || existing.description,
-              is_canon: entry.isHardSetting == null ? existing.is_canon : entry.isHardSetting ? 1 : 0,
-            };
-            db.prepare("UPDATE world_entries SET name=?, category=?, description=?, is_canon=? WHERE id=?").run(
-              merged.name, merged.category, merged.description, merged.is_canon, existing.id,
-            );
-            entriesByName.set(key, { ...existing, ...merged });
-            updated += 1;
-          } else {
-            const entryId = id();
-            const createdEntry = {
-              id: entryId,
-              name: entry.name,
-              category: entry.category || "背景",
-              description: entry.description,
-              is_canon: entry.isHardSetting === false ? 0 : 1,
-            };
-            db.prepare("INSERT INTO world_entries VALUES (?, ?, ?, ?, ?, ?)").run(
-              createdEntry.id, projectId, createdEntry.category, createdEntry.name, createdEntry.description, createdEntry.is_canon,
-            );
-            entriesByName.set(key, createdEntry);
-            created += 1;
-          }
+          db.prepare("INSERT INTO world_entries VALUES (?, ?, ?, ?, ?, ?)").run(id(), projectId, entry.category || "背景", entry.name, entry.description, entry.isHardSetting === false ? 0 : 1);
         });
-        return `新增 ${created} 条设定，更新 ${updated} 条设定；未删除任何原有设定`;
+        return `已用 JSON 全量替换：删除原有 ${removed} 条设定，导入 ${imported.worldEntries.length} 条设定`;
       })();
     }
     case "create-event": {
@@ -630,45 +560,12 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
       if (!projectId) throw new Error("缺少作品编号");
       const imported = normalizeTimelineImportData(payload.data);
       return db.transaction(() => {
-        type EventRow = { id: string; title: string; story_time: string; description: string; causes: string; consequences: string };
-        const rows = db.prepare("SELECT id, title, story_time, description, causes, consequences FROM story_events WHERE project_id=?").all(projectId) as EventRow[];
-        const eventsByTitle = new Map(rows.map((row) => [normalizeTimelineEventTitle(row.title), row]));
-        let created = 0;
-        let updated = 0;
+        const removed = (db.prepare("SELECT COUNT(*) AS count FROM story_events WHERE project_id=?").get(projectId) as { count: number }).count;
+        db.prepare("DELETE FROM story_events WHERE project_id=?").run(projectId);
         imported.events.forEach((event) => {
-          const key = normalizeTimelineEventTitle(event.title);
-          const existing = eventsByTitle.get(key);
-          if (existing) {
-            const merged = {
-              title: event.title,
-              story_time: event.storyTime || existing.story_time,
-              description: event.description || existing.description,
-              causes: event.causes || existing.causes,
-              consequences: event.consequences || existing.consequences,
-            };
-            db.prepare("UPDATE story_events SET title=?, story_time=?, description=?, causes=?, consequences=? WHERE id=?").run(
-              merged.title, merged.story_time, merged.description, merged.causes, merged.consequences, existing.id,
-            );
-            eventsByTitle.set(key, { ...existing, ...merged });
-            updated += 1;
-          } else {
-            const eventId = id();
-            const createdEvent = {
-              id: eventId,
-              title: event.title,
-              story_time: event.storyTime,
-              description: event.description,
-              causes: event.causes,
-              consequences: event.consequences,
-            };
-            db.prepare("INSERT INTO story_events VALUES (?, ?, NULL, ?, ?, ?, ?, ?)").run(
-              createdEvent.id, projectId, createdEvent.title, createdEvent.story_time, createdEvent.description, createdEvent.causes, createdEvent.consequences,
-            );
-            eventsByTitle.set(key, createdEvent);
-            created += 1;
-          }
+          db.prepare("INSERT INTO story_events VALUES (?, ?, NULL, ?, ?, ?, ?, ?)").run(id(), projectId, event.title, event.storyTime, event.description, event.causes, event.consequences);
         });
-        return `新增 ${created} 个事件，更新 ${updated} 个事件；未删除任何原有事件`;
+        return `已用 JSON 全量替换：删除原有 ${removed} 个事件，导入 ${imported.events.length} 个事件`;
       })();
     }
     case "create-relationship": {
