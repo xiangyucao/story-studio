@@ -30,4 +30,12 @@ describe("manual external AI workflow", () => {
       proposal: { rationale: "节奏克制", genre: "心理悬疑", premise: "陌生城市中的身份追索", styleGuide: "限制视角；短句；少用解释" },
     });
   });
+
+  it("为外部模型生成基于全文判断的精简范本指令", () => {
+    const prompt = buildManualAiPrompt({ action: "compact-reference", context: "作品资料", selection: "完整参考原文", instruction: "精简", targetLength: 10000 });
+    expect(prompt).toContain("约 10000 个中文字");
+    expect(prompt).toContain("不得改写、概括");
+    expect(prompt).toContain("不要机械地只取开头、中段和结尾");
+    expect(prompt).toContain("完整参考原文");
+  });
 });

@@ -153,6 +153,7 @@ button { cursor: pointer; }
 .reference-file { display: flex; align-items: center; gap: 8px; margin: 8px 0; padding: 9px 11px; color: var(--muted); background: #f4efe8; border-radius: 7px; font-size: 10px; }
 .reference-file svg { color: var(--accent); }
 .reference-file span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reference-sample .reference-file .text-button { display: none; }
 .reference-sample .field textarea { min-height: 150px; }
 .reference-compact { margin: -8px 0 16px; padding: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; }
 .reference-compact-head { display: grid; grid-template-columns: 1fr 120px auto; align-items: end; gap: 12px; }
@@ -161,7 +162,6 @@ button { cursor: pointer; }
 .reference-compact-head small { margin-top: 3px; color: var(--muted); font-size: 10px; }
 .reference-compact-head label span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; font-weight: 700; }
 .reference-compact-head input { width: 100%; padding: 9px; background: white; border: 1px solid var(--line); border-radius: 7px; }
-.reference-compact .field textarea { min-height: 190px; }
 .foundation-ai-analysis { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 14px; margin: -8px 0 22px; padding: 14px 16px; background: #f5f0e9; border: 1px solid var(--line); border-radius: 10px; }
 .foundation-ai-analysis > div:first-child { display: flex; align-items: center; gap: 10px; }
 .foundation-ai-analysis > div:first-child svg { flex: 0 0 auto; color: var(--accent); }

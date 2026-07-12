@@ -13,10 +13,9 @@ import { characterImportExample, normalizeCharacterName, parseCharacterImportJso
 import { normalizeWorldEntryName, parseWorldImportJson, worldImportExample, type WorldImportData } from "@/lib/world-import";
 import { normalizeTimelineEventTitle, parseTimelineImportJson, timelineImportExample, type TimelineImportData } from "@/lib/timeline-import";
 import { parseManualAiResponse, type ManualAiAction } from "@/lib/manual-ai";
-import { referenceStyleExcerpt } from "@/lib/context";
 
 type Tab = "write" | "outline" | "characters" | "world" | "logic" | "history";
-type AiAction = "outline" | "outline-volume" | "outline-node" | "foundation" | "expand" | "revise" | "logic";
+type AiAction = "outline" | "outline-volume" | "outline-node" | "foundation" | "compact-reference" | "expand" | "revise" | "logic";
 type NodeCreateDraft = { type: "volume" | "chapter" | "scene"; parentId: string | null; afterId: string | null; title: string; summary: string; heading: string };
 type RelationshipDraft = { sourceCharacterId: string; targetCharacterId: string; type: string; description: string };
 type CharacterImportPreview = { fileName: string; data: CharacterImportData; missingNames: string[] };
@@ -41,6 +40,7 @@ type ManualPromptResponse = {
   targetChapterTitle?: string;
   requestId?: string;
 };
+type ReferenceSampleResponse = { type: "reference-sample"; result: string; requestId?: string };
 type ManualAiExchange = Omit<ManualPromptResponse, "type"> & { response: string; error?: string };
 
 const navItems: Array<{ id: Tab; label: string; icon: typeof BookOpen }> = [
@@ -74,7 +74,7 @@ type ModelDiscovery = { found: boolean; baseUrl: string; models: string[] };
 
 const isVolumeLikeNode = (node: Workspace["outline"][number]) => node.type === "volume" || (node.type === "chapter" && /^第[0-9一二三四五六七八九十百]+卷(?:[：:\s]|$)/.test(node.title));
 const providerLabel = (settings: ModelSettings) => settings.provider === "manual" ? "外部手动模型" : settings.provider === "openai-compatible" ? "本地模型" : "OpenAI";
-const isManualTextAction = (action: ManualAiAction) => action === "expand" || action === "revise" || action === "logic";
+const isManualTextAction = (action: ManualAiAction) => action === "expand" || action === "revise" || action === "logic" || action === "compact-reference";
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) } });
@@ -230,16 +230,17 @@ export function StoryStudio() {
     setAiError("");
     setProposal(null);
     try {
-      const data = await jsonFetch<AiProposal | ManualPromptResponse>("/api/ai", {
+      const data = await jsonFetch<AiProposal | ManualPromptResponse | ReferenceSampleResponse>("/api/ai", {
         method: "POST",
         body: JSON.stringify({
           action,
           projectId: workspace.project.id,
           chapterId: chapterDraft?.id || undefined,
-          selection: action === "foundation" ? projectDraft?.referenceText : action === "outline-node" || action === "outline-volume" ? JSON.stringify(outlineDraft) : chapterDraft?.content,
+          selection: action === "foundation" || action === "compact-reference" ? projectDraft?.referenceText : action === "outline-node" || action === "outline-volume" ? JSON.stringify(outlineDraft) : chapterDraft?.content,
           instruction,
           count: action === "outline-volume" ? volumeChapterCount : action === "outline" ? outlineVolumeCount : undefined,
           targetWordCount: chapterDraft?.targetWordCount,
+          referenceLength: action === "compact-reference" ? referenceSampleLength : undefined,
           settings,
         }),
       });
@@ -251,6 +252,14 @@ export function StoryStudio() {
         } catch {
           setMessage("写作指令已生成，请点击“复制完整提示词”");
         }
+        return;
+      }
+      if (data.type === "reference-sample") {
+        if (!projectDraft) return;
+        const next = { ...projectDraft, referenceText: data.result };
+        setProjectDraft(next);
+        await mutate("save-project", next as unknown as Record<string, unknown>);
+        setMessage(`AI 已将范本内容精简为约 ${data.result.replace(/\s/g, "").length.toLocaleString()} 字`);
         return;
       }
       setProposal(data);
@@ -592,7 +601,7 @@ export function StoryStudio() {
       if (file.size > 2 * 1024 * 1024) throw new Error("参考作品文件不能超过 2 MB；可截取有代表性的章节后再上传");
       const referenceText = (await file.text()).trim();
       if (!referenceText) throw new Error("参考作品文件没有可读取的文字");
-      const next = { ...projectDraft, referenceTitle: file.name, referenceText, referenceSample: "" };
+      const next = { ...projectDraft, referenceTitle: file.name, referenceText };
       setProjectDraft(next);
       const result = await mutate("save-project", next as unknown as Record<string, unknown>);
       if (result) setMessage(`已载入并保存参考范本《${file.name}》，AI 将抽取代表片段学习风格`);
@@ -606,11 +615,11 @@ export function StoryStudio() {
   const compactReferenceWork = async () => {
     if (!projectDraft?.referenceText.trim()) return;
     const targetLength = Math.max(1000, Math.min(50000, Math.round(referenceSampleLength || 10000)));
-    const referenceSample = referenceStyleExcerpt(projectDraft.referenceText, targetLength);
-    const next = { ...projectDraft, referenceSample };
-    setProjectDraft(next);
-    const result = await mutate("save-project", next as unknown as Record<string, unknown>);
-    if (result) setMessage(`已提取约 ${referenceSample.replace(/\s/g, "").length.toLocaleString()} 字的精简范本；完整原文仍然保留`);
+    if (!window.confirm(`AI 将从当前 ${projectDraft.referenceText.replace(/\s/g, "").length.toLocaleString()} 字范本中挑选约 ${targetLength.toLocaleString()} 字代表性原文，并直接替换当前范本内容。确认继续？`)) return;
+    setAiAction("compact-reference");
+    setProposal(null);
+    setAiError("");
+    await callAi("compact-reference", `从完整参考作品中挑选约 ${targetLength} 个中文字的代表性原文，直接作为新的范本内容。必须保留原句，不得总结或改写。`);
   };
 
   const wordCount = useMemo(() => chapterDraft?.content.replace(/\s/g, "").length ?? 0, [chapterDraft?.content]);
@@ -706,7 +715,7 @@ export function StoryStudio() {
         {activeTab === "outline" && (
           <ContentPage eyebrow="STRUCTURE" title="故事大纲" description="先确定卷、章和场景，再进入写作扩展；每个节点都可以独立修改。" action={<div className="page-actions"><button className="secondary-button" onClick={() => referenceImportInputRef.current?.click()}><Upload size={16} />上传参考作品</button><button className="primary-button" onClick={() => { setAiAction("outline"); setOutlineVolumeCount(7); setAiInstruction(""); setProposal(null); setAiError(""); setOverallOutlineOpen(true); }}><Sparkles size={17} />用 AI 构思整体大纲</button></div>}>
             {projectDraft && <div className="project-foundation"><div className="section-heading"><div><span className="eyebrow">STORY FOUNDATION</span><h2>作品基石</h2></div><button className="primary-button small" onClick={() => void mutate("save-project", projectDraft as unknown as Record<string, unknown>)}><Save size={15} />保存</button></div><div className="foundation-grid"><Field label="作品名" value={projectDraft.title} onChange={(title) => setProjectDraft({ ...projectDraft, title })} /><Field label="类型" value={projectDraft.genre} onChange={(genre) => setProjectDraft({ ...projectDraft, genre })} /></div><Field label="核心构想" value={projectDraft.premise} multiline onChange={(premise) => setProjectDraft({ ...projectDraft, premise })} /><Field label="写作规则 / 风格指南" value={projectDraft.styleGuide} multiline onChange={(styleGuide) => setProjectDraft({ ...projectDraft, styleGuide })} /><div className="reference-sample"><div className="reference-sample-head"><div><span className="eyebrow">STYLE REFERENCE</span><strong>参考范本 / 参考片段</strong><small>AI 只学习叙事视角、句式、节奏和氛围，不继承范本的人物与剧情。</small></div><input ref={referenceImportInputRef} className="visually-hidden" type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => void importReferenceWork(event.target.files?.[0])} /><button className="secondary-button small" onClick={() => referenceImportInputRef.current?.click()}><Upload size={15} />{projectDraft.referenceText ? "更换作品" : "上传作品"}</button></div>{projectDraft.referenceTitle && <div className="reference-file"><FileText size={15} /><span>{projectDraft.referenceTitle} · {projectDraft.referenceText.length.toLocaleString()} 字符</span><button className="text-button" onClick={() => setProjectDraft({ ...projectDraft, referenceTitle: "", referenceText: "" })}>清空</button></div>}<Field label="范本内容" value={projectDraft.referenceText} multiline onChange={(referenceText) => setProjectDraft({ ...projectDraft, referenceText })} /></div></div>}
-            {projectDraft?.referenceText && <div className="reference-compact"><div className="reference-compact-head"><div><span className="eyebrow">REFERENCE EXCERPT</span><strong>精简范本</strong><small>保留完整原文，按开头、中段、结尾提取指定长度的代表性原文给 AI 使用。</small></div><label><span>目标字数</span><input type="number" min={1000} max={50000} step={1000} value={referenceSampleLength} onChange={(event) => setReferenceSampleLength(Math.max(1000, Math.min(50000, Number(event.target.value) || 10000)))} /></label><button className="secondary-button" disabled={busy} onClick={() => void compactReferenceWork()}><Sparkles size={16} />{projectDraft.referenceSample ? "重新精简" : "精简范本"}</button></div>{projectDraft.referenceSample && <><div className="reference-file"><FileText size={15} /><span>当前精简范本 · {projectDraft.referenceSample.replace(/\s/g, "").length.toLocaleString()} 字</span><button className="text-button" onClick={() => setProjectDraft({ ...projectDraft, referenceSample: "" })}>移除精简版</button></div><Field label="AI 实际使用的精简范本（可以手动修改）" value={projectDraft.referenceSample} multiline onChange={(referenceSample) => setProjectDraft({ ...projectDraft, referenceSample })} /></>}</div>}
+            {projectDraft?.referenceText && <div className="reference-compact"><div className="reference-compact-head"><div><span className="eyebrow">AI REFERENCE EXTRACTION</span><strong>精简范本</strong><small>AI 阅读完整范本后挑选最具代表性的原文段落，并直接替换上方“范本内容”。不会机械地固定抽取开头、中段和结尾。</small></div><label><span>目标字数</span><input type="number" min={1000} max={50000} step={1000} value={referenceSampleLength} onChange={(event) => setReferenceSampleLength(Math.max(1000, Math.min(50000, Number(event.target.value) || 10000)))} /></label><button className="secondary-button" disabled={busy} onClick={() => void compactReferenceWork()}>{busy && aiAction === "compact-reference" ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}{busy && aiAction === "compact-reference" ? "AI 正在提取…" : "精简范本"}</button></div>{aiAction === "compact-reference" && aiError && <div className="ai-error"><AlertTriangle size={16} /><span>精简失败：{aiError}</span></div>}</div>}
             {projectDraft?.referenceText && <div className="foundation-ai-analysis"><div><BrainCircuit size={20} /><span><strong>从参考范本反推作品基石</strong><small>分析范本的类型倾向、核心驱动力和文体特征；结果会先作为提案显示。</small></span></div><button className="secondary-button" disabled={busy} onClick={() => { setAiAction("foundation"); setProposal(null); setAiError(""); void callAi("foundation", "请根据参考范本反推适合这部新作品的类型、核心构想和可执行写作风格。核心构想必须是新的创作方向，不要复述或复制范本剧情。"); }}>{busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}AI 反推类型、构想与风格</button>{proposal?.type === "foundation" && <ProposalCard proposal={proposal} onApply={() => void applyProposal()} onClose={() => setProposal(null)} />}</div>}
             {aiAction === "foundation" && aiError && <div className="ai-error foundation-ai-error"><AlertTriangle size={16} /><span>反推失败：{aiError}</span></div>}
             <div className="outline-grid">
@@ -764,7 +773,16 @@ export function StoryStudio() {
       {worldImportPreview && <div className="modal-backdrop" onMouseDown={() => setWorldImportPreview(null)}><section className="settings-modal wide-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">WORLD JSON IMPORT</span><h2>导入世界观与背景</h2></div><button className="icon-button" aria-label="关闭世界观 JSON 导入预览" onClick={() => setWorldImportPreview(null)}><X size={19} /></button></div><p className="modal-help">文件：{worldImportPreview.fileName}。只新增或更新，绝不会删除原有设定。同名设定更新非空字段；JSON 未提供的字段保留原值。</p><div className="import-summary"><span><strong>{worldImportPreview.data.worldEntries.length}</strong> 条设定</span><span><strong>{worldImportPreview.data.worldEntries.filter((entry) => entry.isHardSetting === true).length}</strong> 条明确标为硬设定</span></div><div className="import-preview-list">{worldImportPreview.data.worldEntries.map((entry) => { const existing = workspace.worldEntries.some((item) => normalizeWorldEntryName(item.name) === normalizeWorldEntryName(entry.name)); return <div className="import-preview-row" key={entry.name}><span className={existing ? "import-status update" : "import-status"}>{existing ? "更新" : "新增"}</span><div><strong>{entry.name}</strong><small>{entry.category || "保留原分类 / 默认背景"} · {entry.isHardSetting == null ? "保留 AI 使用方式" : entry.isHardSetting ? "硬设定" : "草稿"}</small></div></div>; })}</div><div className="modal-button-row"><button className="secondary-button" onClick={() => setWorldImportPreview(null)}>取消</button><button className="primary-button" disabled={busy} onClick={() => void importWorldFromJson()}>{busy ? <LoaderCircle className="spin" size={17} /> : <Upload size={17} />}确认导入</button></div></section></div>}
       {timelineImportPreview && <div className="modal-backdrop" onMouseDown={() => setTimelineImportPreview(null)}><section className="settings-modal wide-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">TIMELINE JSON IMPORT</span><h2>导入事件时间线</h2></div><button className="icon-button" aria-label="关闭时间线 JSON 导入预览" onClick={() => setTimelineImportPreview(null)}><X size={19} /></button></div><p className="modal-help">文件：{timelineImportPreview.fileName}。只新增或更新，绝不会删除原有事件。同名事件更新非空字段；JSON 未提供的字段保留原值。</p><div className="import-summary"><span><strong>{timelineImportPreview.data.events.length}</strong> 个事件</span><span><strong>{timelineImportPreview.data.events.filter((event) => event.causes || event.consequences).length}</strong> 个包含因果链</span></div><div className="import-preview-list">{timelineImportPreview.data.events.map((event) => { const existing = workspace.events.some((item) => normalizeTimelineEventTitle(item.title) === normalizeTimelineEventTitle(event.title)); return <div className="import-preview-row" key={event.title}><span className={existing ? "import-status update" : "import-status"}>{existing ? "更新" : "新增"}</span><div><strong>{event.title}</strong><small>{event.storyTime || "保留原时间 / 时间待定"}{event.causes ? ` · 原因：${event.causes}` : ""}</small></div></div>; })}</div><div className="modal-button-row"><button className="secondary-button" onClick={() => setTimelineImportPreview(null)}>取消</button><button className="primary-button" disabled={busy} onClick={() => void importTimelineFromJson()}>{busy ? <LoaderCircle className="spin" size={17} /> : <Upload size={17} />}确认导入</button></div></section></div>}
       {jsonExampleKind && <div className="modal-backdrop" onMouseDown={() => setJsonExampleKind(null)}><section className="settings-modal wide-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">JSON EXAMPLE</span><h2>{jsonExampleTitles[jsonExampleKind]}</h2></div><button className="icon-button" aria-label="关闭 JSON 示例" onClick={() => setJsonExampleKind(null)}><X size={19} /></button></div><p className="modal-help">保存为 UTF-8 编码的 .json 文件后即可导入。导入只新增或更新同名内容，不会删除当前作品中的任何原有资料。</p><pre className="json-example-code">{JSON.stringify(jsonImportExamples[jsonExampleKind], null, 2)}</pre><div className="modal-button-row"><button className="secondary-button" onClick={() => setJsonExampleKind(null)}>关闭</button><button className="primary-button" onClick={async () => { try { await navigator.clipboard.writeText(JSON.stringify(jsonImportExamples[jsonExampleKind], null, 2)); setMessage("JSON 示例已复制到剪贴板"); } catch { setMessage("无法自动复制，请在示例代码中手动选择复制"); } }}>复制示例</button></div></section></div>}
-      {manualAiExchange && <div className="modal-backdrop manual-ai-backdrop" onMouseDown={() => setManualAiExchange(null)}><section className="settings-modal manual-ai-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">EXTERNAL AI EXCHANGE</span><h2>{isManualTextAction(manualAiExchange.action) ? "外部模型写作指令" : "与外部模型交换内容"}</h2></div><button className="icon-button" aria-label="关闭外部模型交换" onClick={() => setManualAiExchange(null)}><X size={19} /></button></div><p className="modal-help">{isManualTextAction(manualAiExchange.action) ? `已为 ${settings.model || "外部模型"} 整理好完整写作指令。复制后粘贴到外部模型；取得正文后直接贴进写作页面中央编辑器并点击“保存”。` : `已为 ${settings.model || "外部模型"} 整理好完整资料。第一步复制提示词到 Gemini、Claude 或 NotebookLM；第二步把它的 JSON 返回结果粘贴到下方。系统不会自动访问外部网站。`}</p>{manualAiExchange.targetChapterTitle && <div className="manual-target"><FileText size={16} /><span>唯一目标章节：<strong>{manualAiExchange.targetChapterTitle}</strong></span></div>}<label className="field manual-ai-field"><span>发给外部模型的完整提示词</span><textarea readOnly value={manualAiExchange.prompt} /></label><button className="secondary-button full-action" onClick={async () => { try { await navigator.clipboard.writeText(manualAiExchange.prompt); setMessage("完整提示词已复制"); } catch { setMessage("无法自动复制，请在提示词框中手动选择复制"); } }}><FileText size={16} />复制完整提示词</button>{!isManualTextAction(manualAiExchange.action) && <><label className="field manual-ai-field"><span>2. 粘贴外部模型的 JSON 返回结果</span><textarea value={manualAiExchange.response} onChange={(event) => setManualAiExchange({ ...manualAiExchange, response: event.target.value, error: undefined })} placeholder="粘贴外部模型返回的 JSON……" /></label>{manualAiExchange.error && <div className="ai-error"><AlertTriangle size={16} /><span>{manualAiExchange.error}</span></div>}<div className="modal-button-row"><button className="secondary-button" onClick={() => setManualAiExchange(null)}>取消</button><button className="primary-button" disabled={!manualAiExchange.response.trim()} onClick={acceptManualAiResponse}><Check size={16} />转换为提案并预览</button></div></>}</section></div>}
+      {manualAiExchange && <div className="modal-backdrop manual-ai-backdrop" onMouseDown={() => setManualAiExchange(null)}>
+        <section className="settings-modal manual-ai-modal" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="modal-head"><div><span className="eyebrow">EXTERNAL AI EXCHANGE</span><h2>{manualAiExchange.action === "compact-reference" ? "外部模型精简范本指令" : isManualTextAction(manualAiExchange.action) ? "外部模型写作指令" : "与外部模型交换内容"}</h2></div><button className="icon-button" aria-label="关闭外部模型交换" onClick={() => setManualAiExchange(null)}><X size={19} /></button></div>
+          <p className="modal-help">{manualAiExchange.action === "compact-reference" ? `已为 ${settings.model || "外部模型"} 整理好提取指令。复制到外部模型后，把返回的代表性原文直接替换“范本内容”并保存。` : isManualTextAction(manualAiExchange.action) ? `已为 ${settings.model || "外部模型"} 整理好完整写作指令。复制后粘贴到外部模型；取得正文后直接贴进写作页面中央编辑器并点击“保存”。` : `已为 ${settings.model || "外部模型"} 整理好完整资料。第一步复制提示词到 Gemini、Claude 或 NotebookLM；第二步把它的 JSON 返回结果粘贴到下方。系统不会自动访问外部网站。`}</p>
+          {manualAiExchange.targetChapterTitle && <div className="manual-target"><FileText size={16} /><span>唯一目标章节：<strong>{manualAiExchange.targetChapterTitle}</strong></span></div>}
+          <label className="field manual-ai-field"><span>发给外部模型的完整提示词</span><textarea readOnly value={manualAiExchange.prompt} /></label>
+          <button className="secondary-button full-action" onClick={async () => { try { await navigator.clipboard.writeText(manualAiExchange.prompt); setMessage("完整提示词已复制"); } catch { setMessage("无法自动复制，请在提示词框中手动选择复制"); } }}><FileText size={16} />复制完整提示词</button>
+          {!isManualTextAction(manualAiExchange.action) && <><label className="field manual-ai-field"><span>2. 粘贴外部模型的 JSON 返回结果</span><textarea value={manualAiExchange.response} onChange={(event) => setManualAiExchange({ ...manualAiExchange, response: event.target.value, error: undefined })} placeholder="粘贴外部模型返回的 JSON……" /></label>{manualAiExchange.error && <div className="ai-error"><AlertTriangle size={16} /><span>{manualAiExchange.error}</span></div>}<div className="modal-button-row"><button className="secondary-button" onClick={() => setManualAiExchange(null)}>取消</button><button className="primary-button" disabled={!manualAiExchange.response.trim()} onClick={acceptManualAiResponse}><Check size={16} />转换为提案并预览</button></div></>}
+        </section>
+      </div>}
     </main>
   );
 }

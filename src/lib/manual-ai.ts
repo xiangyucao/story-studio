@@ -1,6 +1,6 @@
 import { normalizeFoundationProposal } from "./foundation-proposal";
 
-export type ManualAiAction = "outline" | "outline-volume" | "outline-node" | "foundation" | "expand" | "revise" | "logic";
+export type ManualAiAction = "outline" | "outline-volume" | "outline-node" | "foundation" | "compact-reference" | "expand" | "revise" | "logic";
 
 export type ManualAiRequest = {
   action: ManualAiAction;
@@ -8,6 +8,7 @@ export type ManualAiRequest = {
   instruction: string;
   selection?: string;
   count?: number;
+  targetLength?: number;
   targetChapter?: { id: string; title: string; summary: string; targetWordCount: number };
 };
 
@@ -53,6 +54,14 @@ export function buildManualAiPrompt(request: ManualAiRequest) {
     `【用户要求】\n${request.instruction}`,
     `【输出格式】\n${structuredOutput("foundation", count)}`,
   ].join("\n\n");
+  if (request.action === "compact-reference") {
+    const targetLength = Math.max(1000, Math.min(50000, Math.round(request.targetLength || 10000)));
+    return [
+      "你是文学样本编辑。请从参考作品原文中挑选最能代表叙事视角、句式、节奏、氛围、对话和描写方式的段落。必须逐字保留原文，不得改写、概括、续写或添加评价。不要机械地只取开头、中段和结尾。",
+      `【目标】\n提取约 ${targetLength} 个中文字（允许上下浮动 10%）。只输出选中的原文段落，段落组之间用 --- 分隔。`,
+      `【完整参考作品原文】\n${request.selection || request.context}`,
+    ].join("\n\n");
+  }
 
   if (!request.targetChapter) throw new Error("当前目标章节不存在");
   const target = request.targetChapter;
@@ -86,7 +95,7 @@ function text(value: unknown, label: string) {
 export function parseManualAiResponse(action: ManualAiAction, response: string, targetChapterId?: string): ManualParsedProposal {
   const trimmed = response.trim();
   if (!trimmed) throw new Error("请先粘贴外部模型的返回结果");
-  if (action === "expand" || action === "revise" || action === "logic") return { type: "text", result: trimmed, targetChapterId };
+  if (action === "expand" || action === "revise" || action === "logic" || action === "compact-reference") return { type: "text", result: trimmed, targetChapterId };
   const value = parseJsonObject(trimmed);
   if (action === "outline-node") return {
     type: "outline-node",

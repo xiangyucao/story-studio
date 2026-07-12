@@ -192,3 +192,19 @@ export async function generateFoundationFromReference(settings: ModelSettings, c
   if (!match) throw new Error("本地模型没有返回 JSON 作品基石提案");
   return foundationProposalSchema.parse(normalizeFoundationProposal(JSON.parse(match[0])));
 }
+
+export async function generateReferenceSample(settings: ModelSettings, referenceText: string, targetLength = 10000) {
+  const length = Math.max(1000, Math.min(50000, Math.round(targetLength || 10000)));
+  const system = "你是文学样本编辑。请从用户提供的参考作品原文中挑选最能代表其叙事视角、句式、节奏、氛围、对话和描写方式的段落。必须逐字保留原文，不得改写、概括、续写或添加评价；可以从原文不同位置选择多个完整段落，并保持各段内部原有顺序。";
+  const prompt = `目标：提取约 ${length} 个中文字的代表性范本（允许上下浮动 10%）。不要只固定选择开头、中段和结尾，应根据文体代表性判断。只输出选中的原文段落，段落组之间用“\n\n---\n\n”分隔。\n\n【完整参考作品原文】\n${referenceText}`;
+  const result = (await generateText(settings, system, prompt)).trim();
+  if (!result) throw new Error("模型没有返回精简范本");
+  const candidates = result.split(/\n\s*---\s*\n/).map((part) => part.trim()).filter(Boolean);
+  const verbatim = candidates.filter((part) => referenceText.includes(part));
+  const extracted = verbatim.join("\n\n---\n\n");
+  const minimumLength = Math.min(1000, Math.round(length * 0.3));
+  if (extracted.replace(/\s/g, "").length < minimumLength) {
+    throw new Error("模型返回的内容不是可验证的原文摘录，已保留当前范本。请重试或降低目标字数");
+  }
+  return extracted;
+}

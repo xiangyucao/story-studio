@@ -41,7 +41,6 @@ db.exec(`
     style_guide TEXT NOT NULL DEFAULT '',
     reference_title TEXT NOT NULL DEFAULT '',
     reference_text TEXT NOT NULL DEFAULT '',
-    reference_sample TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -146,7 +145,10 @@ ensureColumn("chapters", "based_on_outline_revision", "INTEGER NOT NULL DEFAULT 
 ensureColumn("chapters", "target_word_count", "INTEGER NOT NULL DEFAULT 3000");
 ensureColumn("projects", "reference_title", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("projects", "reference_text", "TEXT NOT NULL DEFAULT ''");
-ensureColumn("projects", "reference_sample", "TEXT NOT NULL DEFAULT ''");
+const legacyProjectColumns = db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+if (legacyProjectColumns.some((column) => column.name === "reference_sample")) {
+  db.exec("UPDATE projects SET reference_text=reference_sample, reference_sample='' WHERE TRIM(reference_sample)<>''");
+}
 db.exec(`
   UPDATE chapters
   SET outline_node_id = (
@@ -171,7 +173,7 @@ function projectFrom(row: Row): Project {
   return {
     id: String(row.id), title: String(row.title), genre: String(row.genre),
     premise: String(row.premise), styleGuide: String(row.style_guide),
-    referenceTitle: String(row.reference_title || ""), referenceText: String(row.reference_text || ""), referenceSample: String(row.reference_sample || ""),
+    referenceTitle: String(row.reference_title || ""), referenceText: String(row.reference_text || ""),
     createdAt: String(row.created_at), updatedAt: String(row.updated_at),
   };
 }
@@ -186,7 +188,7 @@ function seedIfEmpty() {
   const chen = id();
   const created = now();
   const seed = db.transaction(() => {
-    db.prepare("INSERT INTO projects (id, title, genre, premise, style_guide, reference_title, reference_text, reference_sample, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '', '', '', ?, ?)").run(
+    db.prepare("INSERT INTO projects (id, title, genre, premise, style_guide, reference_title, reference_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '', '', ?, ?)").run(
       projectId, "雾港来信（示例项目）", "悬疑 / 家族秘密",
       "离乡十年的林月收到失踪父亲寄出的信，回到终年起雾的海港寻找真相。",
       "克制、具象；避免全知视角；重要揭示必须有前置伏笔。", created, created,
@@ -266,7 +268,7 @@ export function createProject(title: string) {
   const projectId = id();
   const timestamp = now();
   db.transaction(() => {
-    db.prepare("INSERT INTO projects (id, title, genre, premise, style_guide, reference_title, reference_text, reference_sample, created_at, updated_at) VALUES (?, ?, '', '', '', '', '', '', ?, ?)").run(projectId, title || "未命名作品", timestamp, timestamp);
+    db.prepare("INSERT INTO projects (id, title, genre, premise, style_guide, reference_title, reference_text, created_at, updated_at) VALUES (?, ?, '', '', '', '', '', ?, ?)").run(projectId, title || "未命名作品", timestamp, timestamp);
     const outlineId = id();
     db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, NULL, 'chapter', '第一章', '', 0, 'planned', 1)").run(outlineId, projectId);
     db.prepare("INSERT INTO chapters (id, project_id, outline_node_id, title, content, summary, status, position, word_count, outline_stale, based_on_outline_revision, updated_at) VALUES (?, ?, ?, '第一章', '', '', 'draft', 0, 0, 0, 1, ?)").run(id(), projectId, outlineId, timestamp);
@@ -343,7 +345,7 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
   const timestamp = now();
   switch (action) {
     case "save-project":
-      db.prepare("UPDATE projects SET title=?, genre=?, premise=?, style_guide=?, reference_title=?, reference_text=?, reference_sample=?, updated_at=? WHERE id=?").run(payload.title, payload.genre, payload.premise, payload.styleGuide, payload.referenceTitle ?? "", payload.referenceText ?? "", payload.referenceSample ?? "", timestamp, payload.id);
+      db.prepare("UPDATE projects SET title=?, genre=?, premise=?, style_guide=?, reference_title=?, reference_text=?, updated_at=? WHERE id=?").run(payload.title, payload.genre, payload.premise, payload.styleGuide, payload.referenceTitle ?? "", payload.referenceText ?? "", timestamp, payload.id);
       return payload.id;
     case "delete-project": {
       const projectId = String(payload.id || "");

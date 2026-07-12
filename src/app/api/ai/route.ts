@@ -2,27 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { getWorkspace } from "@/lib/db";
 import { buildStoryContext } from "@/lib/context";
-import { clearLocalModelContext, generateFoundationFromReference, generateOutline, generateOutlineNode, generateText, generateVolumeExpansion } from "@/lib/models";
+import { clearLocalModelContext, generateFoundationFromReference, generateOutline, generateOutlineNode, generateReferenceSample, generateText, generateVolumeExpansion } from "@/lib/models";
 import { writeAiLog } from "@/lib/ai-log";
 import { hasWrongChapterHeading } from "@/lib/chapter-target";
 import { buildManualAiPrompt } from "@/lib/manual-ai";
 import type { ModelSettings } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 600;
 
 export async function POST(request: NextRequest) {
   const requestId = randomUUID();
   let logBase: Record<string, unknown> = { requestId };
   try {
     const body = await request.json() as {
-      action: "outline" | "outline-volume" | "outline-node" | "foundation" | "expand" | "revise" | "logic";
+      action: "outline" | "outline-volume" | "outline-node" | "foundation" | "compact-reference" | "expand" | "revise" | "logic";
       projectId: string;
       chapterId?: string;
       instruction: string;
       selection?: string;
       count?: number;
       targetWordCount?: number;
+      referenceLength?: number;
       settings: ModelSettings;
     };
     if (!body.instruction?.trim()) return NextResponse.json({ error: "请输入对 AI 的要求" }, { status: 400 });
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest) {
         instruction: body.instruction,
         selection: body.selection,
         count,
+        targetLength: body.referenceLength,
         targetChapter: targetChapter ? {
           id: targetChapter.id,
           title: targetChapter.title,
@@ -68,6 +70,12 @@ export async function POST(request: NextRequest) {
     if (body.settings.provider === "openai-compatible") {
       const contextClear = await clearLocalModelContext(body.settings);
       writeAiLog({ ...logBase, stage: "local-context-clear", ...contextClear });
+    }
+    if (body.action === "compact-reference") {
+      if (!workspace.project.referenceText.trim()) throw new Error("请先上传或粘贴参考范本");
+      const result = await generateReferenceSample(body.settings, workspace.project.referenceText, body.referenceLength);
+      writeAiLog({ ...logBase, stage: "complete", resultLength: result.length });
+      return NextResponse.json({ type: "reference-sample", result, requestId });
     }
     if (body.action === "foundation") {
       if (!workspace.project.referenceText.trim()) throw new Error("请先上传或粘贴参考范本");
