@@ -41,6 +41,7 @@ type ManualPromptResponse = {
 };
 type ReferenceSampleResponse = { type: "reference-sample"; result: string; requestId?: string };
 type ManualAiExchange = Omit<ManualPromptResponse, "type"> & { response: string; error?: string };
+type BatchWritingProgress = { running: boolean; current: number; total: number; chapterTitle: string; succeeded: number; failed: number };
 
 const navItems: Array<{ id: Tab; label: string; icon: typeof BookOpen }> = [
   { id: "outline", label: "大纲", icon: GitBranch },
@@ -140,6 +141,8 @@ export function StoryStudio() {
   const [logicSources, setLogicSources] = useState<LogicSource[]>([]);
   const [collapsedWritingVolumes, setCollapsedWritingVolumes] = useState<Set<string>>(() => new Set());
   const [collapsedOutlineVolumes, setCollapsedOutlineVolumes] = useState<Set<string>>(() => new Set());
+  const [batchWriting, setBatchWriting] = useState<BatchWritingProgress | null>(null);
+  const stopBatchWritingRef = useRef(false);
 
   const loadWorkspace = useCallback(async (projectId?: string, preferredOutlineId?: string) => {
     setBusy(true);
@@ -330,6 +333,56 @@ export function StoryStudio() {
     }
     setProposal(null);
     setAiInstruction("");
+  };
+
+  const generateAllUnwrittenChapters = async () => {
+    if (!workspace || batchWriting?.running) return;
+    if (settings.provider === "manual") {
+      setMessage("外部手动模型不能自动批量写作，请在模型设置中选择本地模型或 OpenAI");
+      return;
+    }
+    const chapters = [...workspace.chapters].filter((chapter) => !chapter.content.trim()).sort((a, b) => a.position - b.position);
+    if (!chapters.length) { setMessage("当前作品没有尚未开始写的章节"); return; }
+    const targetWords = chapters.reduce((sum, chapter) => sum + (chapter.targetWordCount || 3000), 0);
+    if (!window.confirm(`将按顺序自动扩写 ${chapters.length} 个正文为空的章节，预计目标总字数约 ${targetWords.toLocaleString()} 字。\n\n每章生成后会自动接受并保存；已有正文的章节不会修改。确认开始？`)) return;
+    stopBatchWritingRef.current = false;
+    let succeeded = 0;
+    let failed = 0;
+    const failures: string[] = [];
+    setBusy(true);
+    setMessage("批量写作已开始");
+    try {
+      for (let index = 0; index < chapters.length; index += 1) {
+        if (stopBatchWritingRef.current) break;
+        const chapter = chapters[index];
+        setBatchWriting({ running: true, current: index + 1, total: chapters.length, chapterTitle: chapter.title, succeeded, failed });
+        try {
+          const instruction = "严格根据本章最新大纲扩写为完整章节，不增加与人物、世界观或事件链冲突的新事实。只输出完整正文。";
+          const proposal = await jsonFetch<AiProposal | ManualPromptResponse>("/api/ai", {
+            method: "POST",
+            body: JSON.stringify({ action: "expand", projectId: workspace.project.id, chapterId: chapter.id, selection: "", instruction, targetWordCount: chapter.targetWordCount || 3000, settings }),
+          });
+          if (proposal.type !== "text") throw new Error("模型没有返回章节正文");
+          if (proposal.targetChapterId && proposal.targetChapterId !== chapter.id) throw new Error("模型结果属于错误章节，已阻止写入");
+          await jsonFetch<{ result: string }>("/api/workspace", {
+            method: "POST",
+            body: JSON.stringify({ action: "save-chapter", payload: { ...chapter, content: proposal.result, instruction: "AI 批量按大纲扩写", clearOutlineStale: true } }),
+          });
+          succeeded += 1;
+        } catch (error) {
+          failed += 1;
+          failures.push(`${chapter.title}：${error instanceof Error ? error.message : "生成失败"}`);
+        }
+        setBatchWriting({ running: true, current: index + 1, total: chapters.length, chapterTitle: chapter.title, succeeded, failed });
+      }
+      const stopped = stopBatchWritingRef.current;
+      await loadWorkspace(workspace.project.id);
+      setMessage(`${stopped ? "批量写作已停止" : "批量写作完成"}：成功 ${succeeded} 章，失败 ${failed} 章${failures.length ? `；${failures.slice(0, 2).join("；")}` : ""}`);
+    } finally {
+      setBatchWriting(null);
+      setBusy(false);
+      stopBatchWritingRef.current = false;
+    }
   };
 
   const runLogic = async () => {
@@ -672,6 +725,7 @@ export function StoryStudio() {
           <div className="writer-layout">
             <aside className="chapter-list panel-subtle">
               <div className="section-heading"><div><span className="eyebrow">MANUSCRIPT</span><h2>章节</h2></div><button className="tiny-button" onClick={async () => { const title = window.prompt("新章节标题", `第${workspace.chapters.length + 1}章`); if (title) { const newId = await mutate("create-chapter", { projectId: workspace.project.id, title }); if (newId) setSelectedChapterId(newId); } }}><CirclePlus size={16} /></button></div>
+              <div className="batch-writing-control">{batchWriting?.running ? <><div className="batch-writing-status"><LoaderCircle className="spin" size={15} /><span><strong>{batchWriting.current} / {batchWriting.total}</strong><small>{batchWriting.chapterTitle}</small></span></div><div className="batch-progress"><i style={{ width: `${Math.round((batchWriting.current / batchWriting.total) * 100)}%` }} /></div><button className="danger-text-button" onClick={() => { stopBatchWritingRef.current = true; setMessage("将在当前章节生成并保存后停止"); }}>停止</button></> : <button className="secondary-button full" disabled={busy || workspace.chapters.every((chapter) => chapter.content.trim())} onClick={() => void generateAllUnwrittenChapters()}><WandSparkles size={15} />批量扩写未写章节（{workspace.chapters.filter((chapter) => !chapter.content.trim()).length}）</button>}</div>
               <div className="chapter-items">
                 <ManuscriptTree workspace={workspace} selectedChapterId={selectedChapterId} collapsedVolumes={collapsedWritingVolumes} onToggleVolume={(volumeId) => setCollapsedWritingVolumes((current) => toggleSetValue(current, volumeId))} onSelectChapter={selectChapter} />
               </div>
