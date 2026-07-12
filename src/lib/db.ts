@@ -752,7 +752,16 @@ export function searchLogic(projectId: string, query: string) {
     .filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 8).map((item) => item.event);
   const characterHits = workspace.characters.filter((c) => score(`${c.name} ${c.role} ${c.goal} ${c.fear} ${c.secret} ${c.description}`) > 0).slice(0, 6);
   const worldHits = workspace.worldEntries.filter((w) => score(`${w.name} ${w.category} ${w.description}`) > 0).slice(0, 6);
-  return { eventHits, characterHits, worldHits };
+  const relationshipHits = workspace.relationships
+    .map((relationship) => ({ relationship, score: score(`${relationship.sourceName} ${relationship.targetName} ${relationship.type} ${relationship.description}`) }))
+    .filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 8).map((item) => item.relationship);
+  const outlineHits = workspace.outline
+    .map((node) => ({ node, score: score(`${node.title} ${node.summary}`) }))
+    .filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 10).map((item) => item.node);
+  const chapterHits = workspace.chapters
+    .map((chapter) => ({ chapter, score: score(`${chapter.title} ${chapter.summary} ${chapter.content}`) }))
+    .filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 10).map((item) => item.chapter);
+  return { eventHits, characterHits, relationshipHits, worldHits, outlineHits, chapterHits };
 }
 
 export { dataDir, dbPath };

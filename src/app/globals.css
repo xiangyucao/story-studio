@@ -244,11 +244,34 @@ button { cursor: pointer; }
 .logic-search { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 10px; padding: 12px 12px 12px 17px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 9px 35px #5e554a0c; }
 .logic-search svg { color: var(--muted); }
 .logic-search input { width: 100%; padding: 8px; background: transparent; border: 0; outline: none; font-family: Georgia, "Noto Serif SC", serif; font-size: 15px; }
+.logic-search .primary-button { display: inline-flex; align-items: center; gap: 6px; }
+.logic-mode-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.segmented.logic-mode { flex: 0 0 270px; grid-template-columns: repeat(2, 1fr); margin: 0; }
+.logic-model { flex: 1; max-width: 430px; margin: 0; }
+.logic-mode-help { margin: 9px 2px 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.external-audit-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 18px; padding: 15px 17px; background: #f4efe8; border: 1px solid var(--line); border-radius: 11px; }
+.external-audit-card > div { display: flex; align-items: flex-start; gap: 10px; }
+.external-audit-card > div > svg { flex: 0 0 auto; color: var(--accent); }
+.external-audit-card strong, .external-audit-card small { display: block; }
+.external-audit-card strong { font-size: 12px; }
+.external-audit-card small { max-width: 650px; margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.external-audit-card a { flex: 0 0 auto; text-decoration: none; }
 .logic-result { margin-top: 22px; }
 .logic-result-head { display: flex; align-items: center; gap: 12px; }
 .logic-result-head svg { color: var(--accent); }
 .logic-result h3 { margin: 3px 0 0; font-family: Georgia, "Noto Serif SC", serif; }
 .logic-result pre { margin: 20px 0 0; padding: 18px; overflow: auto; color: #4f4942; background: #f6f1eb; border-radius: 8px; font-family: Georgia, "Noto Serif SC", serif; font-size: 12px; line-height: 1.9; white-space: pre-wrap; }
+.logic-query-rounds { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 16px; }
+.logic-query-rounds > span { color: var(--muted); font-size: 9px; font-weight: 700; text-transform: uppercase; }
+.logic-query-rounds em { padding: 5px 8px; color: #655d91; background: #ece9f7; border-radius: 10px; font-size: 9px; font-style: normal; }
+.logic-sources { margin-top: 18px; padding-top: 17px; border-top: 1px solid var(--line); }
+.logic-sources > strong { display: block; margin-bottom: 9px; font-size: 11px; }
+.logic-sources > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.logic-sources button { min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 2px 8px; padding: 10px; color: var(--ink); background: #faf7f2; border: 1px solid var(--line); border-radius: 8px; text-align: left; }
+.logic-sources button:hover { border-color: #d7b5ad; }
+.logic-sources button span { grid-row: 1 / 3; align-self: start; padding: 3px 4px; color: var(--accent); background: #f4e5e1; border-radius: 8px; font-size: 8px; text-align: center; }
+.logic-sources button b { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.logic-sources button small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .empty-state { display: flex; flex-direction: column; align-items: center; margin-top: 55px; color: #a39a90; text-align: center; }
 .empty-state h3 { margin: 15px 0 4px; color: #554f48; font-family: Georgia, "Noto Serif SC", serif; }
 .empty-state p { max-width: 430px; font-size: 12px; }
@@ -325,6 +348,11 @@ button { cursor: pointer; }
   .character-grid, .world-grid { grid-template-columns: 1fr; }
   .relationship-row { grid-template-columns: 1fr 1fr; }
   .relationship-row p { grid-column: 1 / -1; }
+  .logic-mode-row, .external-audit-card { align-items: stretch; flex-direction: column; }
+  .segmented.logic-mode, .logic-model { width: 100%; max-width: none; flex-basis: auto; }
+  .logic-search { grid-template-columns: 20px 1fr; }
+  .logic-search .primary-button { grid-column: 1 / -1; justify-content: center; }
+  .logic-sources > div { grid-template-columns: 1fr; }
   .inline-ai-card { position: static; }
   .outline-side { position: static; }
   .chapter-outline-brief { grid-template-columns: 1fr; margin: 12px; }

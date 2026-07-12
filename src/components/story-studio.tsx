@@ -21,6 +21,8 @@ type CharacterImportPreview = { fileName: string; data: CharacterImportData; mis
 type WorldImportPreview = { fileName: string; data: WorldImportData };
 type TimelineImportPreview = { fileName: string; data: TimelineImportData };
 type JsonExampleKind = "characters" | "world" | "timeline";
+type LogicSource = { kind: "chapter" | "outline" | "character" | "relationship" | "world" | "event"; id: string; label: string; excerpt: string };
+type LogicResponse = { mode: "quick" | "ai"; answer: string; queries?: string[]; sources?: LogicSource[]; requestId?: string };
 type AiProposal = { type: "text"; result: string; targetChapterId?: string; requestId?: string } | {
   type: "outline";
   proposal: { rationale: string; nodes: Array<{ type: "volume" | "chapter" | "scene"; title: string; summary: string }> };
@@ -117,6 +119,9 @@ export function StoryStudio() {
   const [aiError, setAiError] = useState("");
   const [logicQuery, setLogicQuery] = useState("");
   const [logicAnswer, setLogicAnswer] = useState("");
+  const [logicSearchMode, setLogicSearchMode] = useState<"quick" | "ai">("ai");
+  const [logicQueries, setLogicQueries] = useState<string[]>([]);
+  const [logicSources, setLogicSources] = useState<LogicSource[]>([]);
   const [collapsedWritingVolumes, setCollapsedWritingVolumes] = useState<Set<string>>(() => new Set());
   const [collapsedOutlineVolumes, setCollapsedOutlineVolumes] = useState<Set<string>>(() => new Set());
 
@@ -281,14 +286,50 @@ export function StoryStudio() {
   const runLogic = async () => {
     if (!workspace || !logicQuery.trim()) return;
     setBusy(true);
+    setMessage("");
     try {
-      const result = await jsonFetch<{ answer: string }>("/api/logic", { method: "POST", body: JSON.stringify({ projectId: workspace.project.id, query: logicQuery }) });
+      const result = await jsonFetch<LogicResponse>("/api/logic", { method: "POST", body: JSON.stringify({ projectId: workspace.project.id, query: logicQuery, mode: logicSearchMode, settings: logicSearchMode === "ai" ? settings : undefined }) });
       setLogicAnswer(result.answer);
+      setLogicQueries(result.queries || []);
+      setLogicSources(result.sources || []);
     } catch (error) {
       setLogicAnswer(error instanceof Error ? error.message : "查询失败");
+      setLogicQueries([]);
+      setLogicSources([]);
     } finally {
       setBusy(false);
     }
+  };
+
+  const openLogicSource = (source: LogicSource) => {
+    if (!workspace) return;
+    if (source.kind === "chapter") {
+      const chapter = workspace.chapters.find((item) => item.id === source.id);
+      if (chapter) selectChapter(chapter);
+      return;
+    }
+    if (source.kind === "outline") {
+      const node = workspace.outline.find((item) => item.id === source.id);
+      if (node) { setSelectedOutlineId(node.id); setOutlineDraft({ ...node }); setActiveTab("outline"); }
+      return;
+    }
+    if (source.kind === "character") {
+      const character = workspace.characters.find((item) => item.id === source.id);
+      if (character) { setSelectedCharacterId(character.id); setCharacterDraft({ ...character }); setActiveTab("characters"); }
+      return;
+    }
+    if (source.kind === "relationship") {
+      const relationship = workspace.relationships.find((item) => item.id === source.id);
+      if (relationship) { setSelectedRelationshipId(relationship.id); setRelationshipEditDraft({ ...relationship }); setActiveTab("characters"); }
+      return;
+    }
+    if (source.kind === "world") {
+      const entry = workspace.worldEntries.find((item) => item.id === source.id);
+      if (entry) { setSelectedWorldId(entry.id); setWorldDraft({ ...entry }); setActiveTab("world"); }
+      return;
+    }
+    const event = workspace.events.find((item) => item.id === source.id);
+    if (event) { setSelectedEventId(event.id); setEventDraft({ ...event }); setActiveTab("world"); }
   };
 
   const createNewProject = async () => {
@@ -595,9 +636,12 @@ export function StoryStudio() {
         )}
 
         {activeTab === "logic" && (
-          <ContentPage eyebrow="CONTINUITY" title="逻辑链查询" description="先查询结构化事实，不配置模型也能使用。">
-            <div className="logic-search"><Search size={20} /><input value={logicQuery} onChange={(e) => setLogicQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void runLogic(); }} placeholder="例如：林月为什么可以进入七号仓库？" /><button className="primary-button" onClick={() => void runLogic()}>查询证据链</button></div>
-            {logicAnswer ? <div className="logic-result"><div className="logic-result-head"><Network size={20} /><div><span className="eyebrow">EVIDENCE</span><h3>现有资料中的证据</h3></div></div><pre>{logicAnswer}</pre></div> : <div className="empty-state"><Network size={42} /><h3>从因果关系开始提问</h3><p>系统会同时搜索人物目标与秘密、世界观硬设定、事件原因和结果。</p></div>}
+          <ContentPage eyebrow="CONTINUITY" title="逻辑链查询" description="快速查找结构化事实，或让 AI 分多轮定位章节并检查因果与矛盾。">
+            <div className="logic-mode-row"><div className="segmented logic-mode"><button className={logicSearchMode === "quick" ? "active" : ""} onClick={() => { setLogicSearchMode("quick"); setLogicAnswer(""); }}>快速检索</button><button className={logicSearchMode === "ai" ? "active" : ""} onClick={() => { setLogicSearchMode("ai"); setLogicAnswer(""); }}>AI 深度查询</button></div>{logicSearchMode === "ai" && <div className="active-model-line logic-model"><Bot size={14} /><span>{settings.provider === "openai-compatible" ? "本地模型" : "OpenAI"}：{settings.model}</span><button className="text-button" onClick={() => { setModelCheckMessage(""); setSettingsOpen(true); }}>更改</button></div>}</div>
+            <div className="logic-search"><Search size={20} /><input value={logicQuery} onChange={(e) => setLogicQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !busy) void runLogic(); }} placeholder="例如：林弦为什么会相信觉醒者？前面有足够证据吗？" /><button className="primary-button" disabled={busy || !logicQuery.trim()} onClick={() => void runLogic()}>{busy ? <LoaderCircle className="spin" size={17} /> : <BrainCircuit size={17} />}{busy ? "正在分轮检索…" : logicSearchMode === "ai" ? "AI 深度查询" : "快速查询"}</button></div>
+            <p className="logic-mode-help">{logicSearchMode === "ai" ? "AI 会先拆解问题，再用最多三组检索方向定位人物、关系、设定、事件、大纲和章节原文；不会把整本书一次性发送。" : "完全在本地 SQLite 中进行字面检索，不调用模型，适合快速定位明确名称和事件。"}</p>
+            <div className="external-audit-card"><div><FileType2 size={20} /><span><strong>也可以交给外部长上下文模型复核</strong><small>导出完整作品基石、人物关系、世界观、时间线、大纲和正文，并附带逻辑检查与润色提示词。</small></span></div><a className="secondary-button" href={`/api/export/logic-audit?projectId=${workspace.project.id}`}><Download size={16} />导出逻辑审计包</a></div>
+            {logicAnswer ? <div className="logic-result"><div className="logic-result-head"><Network size={20} /><div><span className="eyebrow">{logicSearchMode === "ai" ? "AI CONTINUITY REVIEW" : "LOCAL EVIDENCE"}</span><h3>{logicSearchMode === "ai" ? "AI 深度分析结果" : "现有资料中的证据"}</h3></div></div>{logicQueries.length > 0 && <div className="logic-query-rounds"><span>检索方向</span>{logicQueries.map((item, index) => <em key={`${item}-${index}`}>{index + 1}. {item}</em>)}</div>}<pre>{logicAnswer}</pre>{logicSources.length > 0 && <div className="logic-sources"><strong>相关资料 · 点击跳转</strong><div>{logicSources.map((source) => <button key={`${source.kind}-${source.id}`} onClick={() => openLogicSource(source)}><span>{source.kind === "chapter" ? "章节" : source.kind === "outline" ? "大纲" : source.kind === "character" ? "人物" : source.kind === "relationship" ? "关系" : source.kind === "world" ? "设定" : "事件"}</span><b>{source.label}</b><small>{source.excerpt}</small></button>)}</div></div>}</div> : <div className="empty-state"><Network size={42} /><h3>从因果关系开始提问</h3><p>适合检查人物动机、时间矛盾、知识穿帮、物品状态、世界观规则和伏笔回收。</p></div>}
           </ContentPage>
         )}
 

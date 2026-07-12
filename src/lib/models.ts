@@ -40,19 +40,21 @@ function clientFor(settings: ModelSettings) {
   });
 }
 
-export async function generateText(settings: ModelSettings, system: string, prompt: string) {
+export async function generateText(settings: ModelSettings, system: string, prompt: string, maxOutputTokens?: number) {
   const client = clientFor(settings);
   if (settings.provider === "openai") {
     const response = await client.responses.create({
       model: settings.model || process.env.OPENAI_MODEL || "gpt-5.4-mini",
       instructions: system,
       input: prompt,
+      ...(maxOutputTokens ? { max_output_tokens: maxOutputTokens } : {}),
     });
     return response.output_text;
   }
   const response = await client.chat.completions.create({
     model: settings.model || process.env.LOCAL_MODEL || "qwen3:8b",
     messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+    ...(maxOutputTokens ? { max_tokens: maxOutputTokens } : {}),
   });
   return response.choices[0]?.message.content ?? "";
 }
