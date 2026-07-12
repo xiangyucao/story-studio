@@ -4,7 +4,7 @@ import type { Workspace } from "./types";
 
 const workspace: Workspace = {
   projects: [],
-  project: { id: "p", title: "测试作品", genre: "悬疑", premise: "寻找失踪者", styleGuide: "限制视角", referenceTitle: "风格范本.md", referenceText: "雨落在旧窗上，声音很轻。", createdAt: "", updatedAt: "" },
+  project: { id: "p", title: "测试作品", genre: "悬疑", premise: "寻找失踪者", styleGuide: "限制视角", referenceTitle: "风格范本.md", referenceText: "雨落在旧窗上，声音很轻。", referenceSample: "", createdAt: "", updatedAt: "" },
   outline: [
     { id: "o", projectId: "p", parentId: null, type: "chapter", title: "第二章", summary: "取得钥匙", position: 0, status: "planned", revision: 1 },
     { id: "s", projectId: "p", parentId: "o", type: "scene", title: "修理铺试探", summary: "林月观察陈叔的回避", position: 1, status: "planned", revision: 1 },
@@ -41,6 +41,13 @@ describe("buildStoryContext", () => {
 
   it("排除未标记为硬设定的条目", () => {
     expect(buildStoryContext(workspace, "c2")).not.toContain("废弃设定");
+  });
+
+  it("存在精简范本时优先发送精简版", () => {
+    const compact = { ...workspace, project: { ...workspace.project, referenceSample: "精简后的代表句式" } };
+    const context = buildStoryContext(compact, "c2");
+    expect(context).toContain("精简后的代表句式");
+    expect(context).not.toContain("雨落在旧窗上");
   });
 });
 

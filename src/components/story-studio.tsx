@@ -13,6 +13,7 @@ import { characterImportExample, normalizeCharacterName, parseCharacterImportJso
 import { normalizeWorldEntryName, parseWorldImportJson, worldImportExample, type WorldImportData } from "@/lib/world-import";
 import { normalizeTimelineEventTitle, parseTimelineImportJson, timelineImportExample, type TimelineImportData } from "@/lib/timeline-import";
 import { parseManualAiResponse, type ManualAiAction } from "@/lib/manual-ai";
+import { referenceStyleExcerpt } from "@/lib/context";
 
 type Tab = "write" | "outline" | "characters" | "world" | "logic" | "history";
 type AiAction = "outline" | "outline-volume" | "outline-node" | "foundation" | "expand" | "revise" | "logic";
@@ -127,6 +128,7 @@ export function StoryStudio() {
   const [aiAction, setAiAction] = useState<AiAction>("revise");
   const [outlineVolumeCount, setOutlineVolumeCount] = useState(7);
   const [volumeChapterCount, setVolumeChapterCount] = useState(7);
+  const [referenceSampleLength, setReferenceSampleLength] = useState(10000);
   const [proposalAction, setProposalAction] = useState<AiAction>("revise");
   const [outlineAiInstruction, setOutlineAiInstruction] = useState("");
   const [proposal, setProposal] = useState<AiProposal | null>(null);
@@ -589,7 +591,7 @@ export function StoryStudio() {
       if (file.size > 2 * 1024 * 1024) throw new Error("参考作品文件不能超过 2 MB；可截取有代表性的章节后再上传");
       const referenceText = (await file.text()).trim();
       if (!referenceText) throw new Error("参考作品文件没有可读取的文字");
-      const next = { ...projectDraft, referenceTitle: file.name, referenceText };
+      const next = { ...projectDraft, referenceTitle: file.name, referenceText, referenceSample: "" };
       setProjectDraft(next);
       const result = await mutate("save-project", next as unknown as Record<string, unknown>);
       if (result) setMessage(`已载入并保存参考范本《${file.name}》，AI 将抽取代表片段学习风格`);
@@ -598,6 +600,16 @@ export function StoryStudio() {
     } finally {
       if (referenceImportInputRef.current) referenceImportInputRef.current.value = "";
     }
+  };
+
+  const compactReferenceWork = async () => {
+    if (!projectDraft?.referenceText.trim()) return;
+    const targetLength = Math.max(1000, Math.min(50000, Math.round(referenceSampleLength || 10000)));
+    const referenceSample = referenceStyleExcerpt(projectDraft.referenceText, targetLength);
+    const next = { ...projectDraft, referenceSample };
+    setProjectDraft(next);
+    const result = await mutate("save-project", next as unknown as Record<string, unknown>);
+    if (result) setMessage(`已提取约 ${referenceSample.replace(/\s/g, "").length.toLocaleString()} 字的精简范本；完整原文仍然保留`);
   };
 
   const wordCount = useMemo(() => chapterDraft?.content.replace(/\s/g, "").length ?? 0, [chapterDraft?.content]);
@@ -693,6 +705,7 @@ export function StoryStudio() {
         {activeTab === "outline" && (
           <ContentPage eyebrow="STRUCTURE" title="故事大纲" description="先确定卷、章和场景，再进入写作扩展；每个节点都可以独立修改。" action={<div className="page-actions"><button className="secondary-button" onClick={() => referenceImportInputRef.current?.click()}><Upload size={16} />上传参考作品</button><button className="primary-button" onClick={() => { setAiAction("outline"); setOutlineVolumeCount(7); setAiInstruction(""); setProposal(null); setAiError(""); setOverallOutlineOpen(true); }}><Sparkles size={17} />用 AI 构思整体大纲</button></div>}>
             {projectDraft && <div className="project-foundation"><div className="section-heading"><div><span className="eyebrow">STORY FOUNDATION</span><h2>作品基石</h2></div><button className="primary-button small" onClick={() => void mutate("save-project", projectDraft as unknown as Record<string, unknown>)}><Save size={15} />保存</button></div><div className="foundation-grid"><Field label="作品名" value={projectDraft.title} onChange={(title) => setProjectDraft({ ...projectDraft, title })} /><Field label="类型" value={projectDraft.genre} onChange={(genre) => setProjectDraft({ ...projectDraft, genre })} /></div><Field label="核心构想" value={projectDraft.premise} multiline onChange={(premise) => setProjectDraft({ ...projectDraft, premise })} /><Field label="写作规则 / 风格指南" value={projectDraft.styleGuide} multiline onChange={(styleGuide) => setProjectDraft({ ...projectDraft, styleGuide })} /><div className="reference-sample"><div className="reference-sample-head"><div><span className="eyebrow">STYLE REFERENCE</span><strong>参考范本 / 参考片段</strong><small>AI 只学习叙事视角、句式、节奏和氛围，不继承范本的人物与剧情。</small></div><input ref={referenceImportInputRef} className="visually-hidden" type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => void importReferenceWork(event.target.files?.[0])} /><button className="secondary-button small" onClick={() => referenceImportInputRef.current?.click()}><Upload size={15} />{projectDraft.referenceText ? "更换作品" : "上传作品"}</button></div>{projectDraft.referenceTitle && <div className="reference-file"><FileText size={15} /><span>{projectDraft.referenceTitle} · {projectDraft.referenceText.length.toLocaleString()} 字符</span><button className="text-button" onClick={() => setProjectDraft({ ...projectDraft, referenceTitle: "", referenceText: "" })}>清空</button></div>}<Field label="范本内容" value={projectDraft.referenceText} multiline onChange={(referenceText) => setProjectDraft({ ...projectDraft, referenceText })} /></div></div>}
+            {projectDraft?.referenceText && <div className="reference-compact"><div className="reference-compact-head"><div><span className="eyebrow">REFERENCE EXCERPT</span><strong>精简范本</strong><small>保留完整原文，按开头、中段、结尾提取指定长度的代表性原文给 AI 使用。</small></div><label><span>目标字数</span><input type="number" min={1000} max={50000} step={1000} value={referenceSampleLength} onChange={(event) => setReferenceSampleLength(Math.max(1000, Math.min(50000, Number(event.target.value) || 10000)))} /></label><button className="secondary-button" disabled={busy} onClick={() => void compactReferenceWork()}><Sparkles size={16} />{projectDraft.referenceSample ? "重新精简" : "精简范本"}</button></div>{projectDraft.referenceSample && <><div className="reference-file"><FileText size={15} /><span>当前精简范本 · {projectDraft.referenceSample.replace(/\s/g, "").length.toLocaleString()} 字</span><button className="text-button" onClick={() => setProjectDraft({ ...projectDraft, referenceSample: "" })}>移除精简版</button></div><Field label="AI 实际使用的精简范本（可以手动修改）" value={projectDraft.referenceSample} multiline onChange={(referenceSample) => setProjectDraft({ ...projectDraft, referenceSample })} /></>}</div>}
             {projectDraft?.referenceText && <div className="foundation-ai-analysis"><div><BrainCircuit size={20} /><span><strong>从参考范本反推作品基石</strong><small>分析范本的类型倾向、核心驱动力和文体特征；结果会先作为提案显示。</small></span></div><button className="secondary-button" disabled={busy} onClick={() => { setAiAction("foundation"); setProposal(null); setAiError(""); void callAi("foundation", "请根据参考范本反推适合这部新作品的类型、核心构想和可执行写作风格。核心构想必须是新的创作方向，不要复述或复制范本剧情。"); }}>{busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}AI 反推类型、构想与风格</button>{proposal?.type === "foundation" && <ProposalCard proposal={proposal} onApply={() => void applyProposal()} onClose={() => setProposal(null)} />}</div>}
             <div className="outline-grid">
               <div className="outline-tree">

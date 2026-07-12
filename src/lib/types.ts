@@ -6,6 +6,7 @@ export type Project = {
   styleGuide: string;
   referenceTitle: string;
   referenceText: string;
+  referenceSample: string;
   createdAt: string;
   updatedAt: string;
 };
