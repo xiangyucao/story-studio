@@ -154,6 +154,12 @@ button { cursor: pointer; }
 .reference-file svg { color: var(--accent); }
 .reference-file span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reference-sample .field textarea { min-height: 150px; }
+.foundation-ai-analysis { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 14px; margin: -8px 0 22px; padding: 14px 16px; background: #f5f0e9; border: 1px solid var(--line); border-radius: 10px; }
+.foundation-ai-analysis > div:first-child { display: flex; align-items: center; gap: 10px; }
+.foundation-ai-analysis > div:first-child svg { flex: 0 0 auto; color: var(--accent); }
+.foundation-ai-analysis strong, .foundation-ai-analysis small { display: block; }
+.foundation-ai-analysis small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.foundation-ai-analysis .proposal-card { grid-column: 1 / -1; }
 .foundation-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
 .outline-tree, .detail-editor, .inline-ai-card, .logic-result { padding: 22px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
 .outline-tree-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 7px 14px; border-bottom: 1px solid #eee8df; }

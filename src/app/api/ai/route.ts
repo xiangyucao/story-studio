@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { getWorkspace } from "@/lib/db";
 import { buildStoryContext } from "@/lib/context";
-import { clearLocalModelContext, generateOutline, generateOutlineNode, generateText, generateVolumeExpansion } from "@/lib/models";
+import { clearLocalModelContext, generateFoundationFromReference, generateOutline, generateOutlineNode, generateText, generateVolumeExpansion } from "@/lib/models";
 import { writeAiLog } from "@/lib/ai-log";
 import { hasWrongChapterHeading } from "@/lib/chapter-target";
 import { buildManualAiPrompt } from "@/lib/manual-ai";
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   let logBase: Record<string, unknown> = { requestId };
   try {
     const body = await request.json() as {
-      action: "outline" | "outline-volume" | "outline-node" | "expand" | "revise" | "logic";
+      action: "outline" | "outline-volume" | "outline-node" | "foundation" | "expand" | "revise" | "logic";
       projectId: string;
       chapterId?: string;
       instruction: string;
@@ -68,6 +68,12 @@ export async function POST(request: NextRequest) {
     if (body.settings.provider === "openai-compatible") {
       const contextClear = await clearLocalModelContext(body.settings);
       writeAiLog({ ...logBase, stage: "local-context-clear", ...contextClear });
+    }
+    if (body.action === "foundation") {
+      if (!workspace.project.referenceText.trim()) throw new Error("请先上传或粘贴参考范本");
+      const proposal = await generateFoundationFromReference(body.settings, context, body.instruction);
+      writeAiLog({ ...logBase, stage: "complete" });
+      return NextResponse.json({ type: "foundation", proposal, requestId });
     }
     if (body.action === "outline") {
       const proposal = await generateOutline(body.settings, context, body.instruction, count);

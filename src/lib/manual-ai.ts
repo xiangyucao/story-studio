@@ -1,4 +1,4 @@
-export type ManualAiAction = "outline" | "outline-volume" | "outline-node" | "expand" | "revise" | "logic";
+export type ManualAiAction = "outline" | "outline-volume" | "outline-node" | "foundation" | "expand" | "revise" | "logic";
 
 export type ManualAiRequest = {
   action: ManualAiAction;
@@ -13,11 +13,13 @@ export type ManualParsedProposal =
   | { type: "text"; result: string; targetChapterId?: string }
   | { type: "outline"; proposal: { rationale: string; nodes: Array<{ type: "volume"; title: string; summary: string }> } }
   | { type: "outline-volume"; proposal: { rationale: string; nodes: Array<{ type: "chapter" | "scene"; title: string; summary: string }> } }
-  | { type: "outline-node"; proposal: { rationale: string; title: string; summary: string } };
+  | { type: "outline-node"; proposal: { rationale: string; title: string; summary: string } }
+  | { type: "foundation"; proposal: { rationale: string; genre: string; premise: string; styleGuide: string } };
 
 const structuredOutput = (action: ManualAiAction, count: number) => {
   if (action === "outline") return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"设计说明","nodes":[{"type":"volume","title":"第一卷：标题","summary":"本卷介绍"}]}\n必须恰好包含 ${count} 个 volume 节点。`;
   if (action === "outline-volume") return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"设计说明","nodes":[{"type":"chapter","title":"第1章：标题","summary":"章节介绍"},{"type":"scene","title":"场景标题","summary":"场景介绍"}]}\n必须恰好包含 ${count} 个 chapter；scene 可选并紧跟所属章。`;
+  if (action === "foundation") return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"分析说明","genre":"类型","premise":"新的核心构想方向","styleGuide":"具体写作规则与风格指南"}`;
   return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"修改说明","title":"修改后的标题","summary":"修改后的摘要"}`;
 };
 
@@ -42,6 +44,12 @@ export function buildManualAiPrompt(request: ManualAiRequest) {
     `【当前节点】\n${request.selection || "未提供"}`,
     `【用户要求】\n${request.instruction}`,
     `【输出格式】\n${structuredOutput("outline-node", count)}`,
+  ].join("\n\n");
+  if (request.action === "foundation") return [
+    "你是小说策划与文体分析编辑。根据作品资料中的参考范本，反推适合当前新作品的类型、核心构想方向和可执行的写作风格指南。不得复制范本人物、剧情、专有名词或原句。",
+    `【作品资料与参考范本】\n${request.context}`,
+    `【用户要求】\n${request.instruction}`,
+    `【输出格式】\n${structuredOutput("foundation", count)}`,
   ].join("\n\n");
 
   if (!request.targetChapter) throw new Error("当前目标章节不存在");
@@ -81,6 +89,15 @@ export function parseManualAiResponse(action: ManualAiAction, response: string, 
   if (action === "outline-node") return {
     type: "outline-node",
     proposal: { rationale: text(value.rationale, "rationale"), title: text(value.title, "title"), summary: text(value.summary, "summary") },
+  };
+  if (action === "foundation") return {
+    type: "foundation",
+    proposal: {
+      rationale: text(value.rationale, "rationale"),
+      genre: text(value.genre, "genre"),
+      premise: text(value.premise, "premise"),
+      styleGuide: text(value.styleGuide, "styleGuide"),
+    },
   };
   if (!Array.isArray(value.nodes)) throw new Error("nodes 必须是数组");
   const nodes = value.nodes.map((node, index) => {

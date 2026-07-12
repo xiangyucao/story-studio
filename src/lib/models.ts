@@ -65,6 +65,13 @@ export const outlineNodeProposalSchema = z.object({
   summary: z.string(),
 });
 
+export const foundationProposalSchema = z.object({
+  rationale: z.string(),
+  genre: z.string(),
+  premise: z.string(),
+  styleGuide: z.string(),
+});
+
 function clientFor(settings: ModelSettings) {
   if (settings.provider === "manual") throw new Error("当前选择的是外部手动模型，请复制提示词并粘贴返回结果");
   if (settings.provider === "openai") {
@@ -163,4 +170,24 @@ export async function generateOutlineNode(settings: ModelSettings, context: stri
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("本地模型没有返回 JSON 节点提案");
   return outlineNodeProposalSchema.parse(JSON.parse(match[0]));
+}
+
+export async function generateFoundationFromReference(settings: ModelSettings, context: string, instruction: string) {
+  const client = clientFor(settings);
+  const system = "你是小说策划与文体分析编辑。根据参考范本反推适合当前新作品的类型、核心构想方向和可执行的写作风格指南。只能分析范本的结构与风格特征，不得复制范本的人物、情节、专有名词或原句。核心构想应是可供作者继续创作的新方向，而不是范本剧情摘要。";
+  const input = `${context}\n\n用户要求：${instruction}`;
+  if (settings.provider === "openai") {
+    const response = await client.responses.parse({
+      model: settings.model || process.env.OPENAI_MODEL || "gpt-5.4-mini",
+      instructions: system,
+      input,
+      text: { format: zodTextFormat(foundationProposalSchema, "foundation_proposal") },
+    });
+    if (!response.output_parsed) throw new Error("模型没有返回可解析的作品基石提案");
+    return response.output_parsed;
+  }
+  const raw = await generateText(settings, `${system} 必须只返回 JSON，格式为 {"rationale":"分析说明","genre":"类型","premise":"新的核心构想方向","styleGuide":"具体写作规则与风格指南"}`, input);
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("本地模型没有返回 JSON 作品基石提案");
+  return foundationProposalSchema.parse(JSON.parse(match[0]));
 }

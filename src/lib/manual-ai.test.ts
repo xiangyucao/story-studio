@@ -20,4 +20,14 @@ describe("manual external AI workflow", () => {
     const result = parseManualAiResponse("outline", '```json\n{"rationale":"七卷推进","nodes":[{"type":"volume","title":"第一卷","summary":"开端"}]}\n```');
     expect(result.type).toBe("outline");
   });
+
+  it("builds and parses a reference foundation analysis", () => {
+    const prompt = buildManualAiPrompt({ action: "foundation", context: "参考范本：冷峻短句", instruction: "反推作品基石" });
+    expect(prompt).toContain("不得复制范本人物、剧情");
+    const result = parseManualAiResponse("foundation", '{"rationale":"节奏克制","genre":"心理悬疑","premise":"陌生城市中的身份追索","styleGuide":"限制视角；短句；少用解释"}');
+    expect(result).toEqual({
+      type: "foundation",
+      proposal: { rationale: "节奏克制", genre: "心理悬疑", premise: "陌生城市中的身份追索", styleGuide: "限制视角；短句；少用解释" },
+    });
+  });
 });

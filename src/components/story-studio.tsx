@@ -15,7 +15,7 @@ import { normalizeTimelineEventTitle, parseTimelineImportJson, timelineImportExa
 import { parseManualAiResponse, type ManualAiAction } from "@/lib/manual-ai";
 
 type Tab = "write" | "outline" | "characters" | "world" | "logic" | "history";
-type AiAction = "outline" | "outline-volume" | "outline-node" | "expand" | "revise" | "logic";
+type AiAction = "outline" | "outline-volume" | "outline-node" | "foundation" | "expand" | "revise" | "logic";
 type NodeCreateDraft = { type: "volume" | "chapter" | "scene"; parentId: string | null; afterId: string | null; title: string; summary: string; heading: string };
 type RelationshipDraft = { sourceCharacterId: string; targetCharacterId: string; type: string; description: string };
 type CharacterImportPreview = { fileName: string; data: CharacterImportData; missingNames: string[] };
@@ -30,7 +30,8 @@ type AiProposal = { type: "text"; result: string; targetChapterId?: string; requ
 } | {
   type: "outline-volume";
   proposal: { rationale: string; nodes: Array<{ type: "chapter" | "scene"; title: string; summary: string }> };
-} | { type: "outline-node"; proposal: { rationale: string; title: string; summary: string } };
+} | { type: "outline-node"; proposal: { rationale: string; title: string; summary: string } }
+  | { type: "foundation"; proposal: { rationale: string; genre: string; premise: string; styleGuide: string } };
 type ManualPromptResponse = {
   type: "manual";
   action: ManualAiAction;
@@ -233,7 +234,7 @@ export function StoryStudio() {
           action,
           projectId: workspace.project.id,
           chapterId: chapterDraft?.id || undefined,
-          selection: action === "outline-node" || action === "outline-volume" ? JSON.stringify(outlineDraft) : chapterDraft?.content,
+          selection: action === "foundation" ? projectDraft?.referenceText : action === "outline-node" || action === "outline-volume" ? JSON.stringify(outlineDraft) : chapterDraft?.content,
           instruction,
           count: action === "outline-volume" ? volumeChapterCount : action === "outline" ? outlineVolumeCount : undefined,
           targetWordCount: chapterDraft?.targetWordCount,
@@ -302,6 +303,12 @@ export function StoryStudio() {
         return;
       }
       await saveChapter(`AI：${aiInstruction || "按最新大纲生成"}`, proposal.result, proposalAction === "expand");
+    } else if (proposal.type === "foundation") {
+      if (!projectDraft) return;
+      const next = { ...projectDraft, genre: proposal.proposal.genre, premise: proposal.proposal.premise, styleGuide: proposal.proposal.styleGuide };
+      setProjectDraft(next);
+      await mutate("save-project", next as unknown as Record<string, unknown>);
+      setMessage("AI 反推的类型、核心构想和写作风格已写入作品基石");
     } else if (proposal.type === "outline-node") {
       if (!outlineDraft) return;
       await mutate("save-outline-node", { ...outlineDraft, title: proposal.proposal.title, summary: proposal.proposal.summary });
@@ -686,6 +693,7 @@ export function StoryStudio() {
         {activeTab === "outline" && (
           <ContentPage eyebrow="STRUCTURE" title="故事大纲" description="先确定卷、章和场景，再进入写作扩展；每个节点都可以独立修改。" action={<div className="page-actions"><button className="secondary-button" onClick={() => referenceImportInputRef.current?.click()}><Upload size={16} />上传参考作品</button><button className="primary-button" onClick={() => { setAiAction("outline"); setOutlineVolumeCount(7); setAiInstruction(""); setProposal(null); setAiError(""); setOverallOutlineOpen(true); }}><Sparkles size={17} />用 AI 构思整体大纲</button></div>}>
             {projectDraft && <div className="project-foundation"><div className="section-heading"><div><span className="eyebrow">STORY FOUNDATION</span><h2>作品基石</h2></div><button className="primary-button small" onClick={() => void mutate("save-project", projectDraft as unknown as Record<string, unknown>)}><Save size={15} />保存</button></div><div className="foundation-grid"><Field label="作品名" value={projectDraft.title} onChange={(title) => setProjectDraft({ ...projectDraft, title })} /><Field label="类型" value={projectDraft.genre} onChange={(genre) => setProjectDraft({ ...projectDraft, genre })} /></div><Field label="核心构想" value={projectDraft.premise} multiline onChange={(premise) => setProjectDraft({ ...projectDraft, premise })} /><Field label="写作规则 / 风格指南" value={projectDraft.styleGuide} multiline onChange={(styleGuide) => setProjectDraft({ ...projectDraft, styleGuide })} /><div className="reference-sample"><div className="reference-sample-head"><div><span className="eyebrow">STYLE REFERENCE</span><strong>参考范本 / 参考片段</strong><small>AI 只学习叙事视角、句式、节奏和氛围，不继承范本的人物与剧情。</small></div><input ref={referenceImportInputRef} className="visually-hidden" type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => void importReferenceWork(event.target.files?.[0])} /><button className="secondary-button small" onClick={() => referenceImportInputRef.current?.click()}><Upload size={15} />{projectDraft.referenceText ? "更换作品" : "上传作品"}</button></div>{projectDraft.referenceTitle && <div className="reference-file"><FileText size={15} /><span>{projectDraft.referenceTitle} · {projectDraft.referenceText.length.toLocaleString()} 字符</span><button className="text-button" onClick={() => setProjectDraft({ ...projectDraft, referenceTitle: "", referenceText: "" })}>清空</button></div>}<Field label="范本内容" value={projectDraft.referenceText} multiline onChange={(referenceText) => setProjectDraft({ ...projectDraft, referenceText })} /></div></div>}
+            {projectDraft?.referenceText && <div className="foundation-ai-analysis"><div><BrainCircuit size={20} /><span><strong>从参考范本反推作品基石</strong><small>分析范本的类型倾向、核心驱动力和文体特征；结果会先作为提案显示。</small></span></div><button className="secondary-button" disabled={busy} onClick={() => { setAiAction("foundation"); setProposal(null); setAiError(""); void callAi("foundation", "请根据参考范本反推适合这部新作品的类型、核心构想和可执行写作风格。核心构想必须是新的创作方向，不要复述或复制范本剧情。"); }}>{busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}AI 反推类型、构想与风格</button>{proposal?.type === "foundation" && <ProposalCard proposal={proposal} onApply={() => void applyProposal()} onClose={() => setProposal(null)} />}</div>}
             <div className="outline-grid">
               <div className="outline-tree">
                 <div className="outline-tree-header"><div><span className="eyebrow">OUTLINE TREE</span><strong>卷 · 章 · 场景</strong></div><button className="secondary-button" onClick={() => setNodeCreateDraft({ type: "volume", parentId: null, afterId: workspace.outline.at(-1)?.id || null, title: `第${workspace.outline.filter((node) => node.type === "volume").length + 1}卷`, summary: "", heading: "添加新卷" })}><CirclePlus size={15} />添加卷</button></div>
@@ -810,7 +818,7 @@ function OutlineTreeBranch({ node, nodes, selectedId, collapsedVolumes, onToggle
 }
 
 function ProposalCard({ proposal, onApply, onClose }: { proposal: AiProposal; onApply: () => void; onClose: () => void }) {
-  return <div className="proposal-card"><div className="proposal-head"><strong>AI 提案</strong><button onClick={onClose}><X size={15} /></button></div>{proposal.type === "text" ? <p>{proposal.result.slice(0, 900)}{proposal.result.length > 900 ? "…" : ""}</p> : proposal.type === "outline-node" ? <div><p>{proposal.proposal.rationale}</p><div className="proposal-node"><span>节点</span><strong>{proposal.proposal.title}</strong><small>{proposal.proposal.summary}</small></div></div> : <div><p>{proposal.proposal.rationale}</p>{proposal.proposal.nodes.map((node, index) => <div className="proposal-node" key={`${node.title}-${index}`}><span>{node.type}</span><strong>{node.title}</strong><small>{node.summary}</small></div>)}</div>}{proposal.type === "text" && proposal.requestId && <small className="proposal-log-id">日志编号：{proposal.requestId}</small>}<button className="accept-button" onClick={onApply}><Check size={16} />接受并写入</button></div>;
+  return <div className="proposal-card"><div className="proposal-head"><strong>AI 提案</strong><button onClick={onClose}><X size={15} /></button></div>{proposal.type === "text" ? <p>{proposal.result.slice(0, 900)}{proposal.result.length > 900 ? "…" : ""}</p> : proposal.type === "foundation" ? <div><p>{proposal.proposal.rationale}</p><div className="proposal-node"><span>类型</span><strong>{proposal.proposal.genre}</strong></div><div className="proposal-node"><span>构想</span><strong>{proposal.proposal.premise}</strong></div><div className="proposal-node"><span>风格</span><strong>{proposal.proposal.styleGuide}</strong></div></div> : proposal.type === "outline-node" ? <div><p>{proposal.proposal.rationale}</p><div className="proposal-node"><span>节点</span><strong>{proposal.proposal.title}</strong><small>{proposal.proposal.summary}</small></div></div> : <div><p>{proposal.proposal.rationale}</p>{proposal.proposal.nodes.map((node, index) => <div className="proposal-node" key={`${node.title}-${index}`}><span>{node.type}</span><strong>{node.title}</strong><small>{node.summary}</small></div>)}</div>}{proposal.type === "text" && proposal.requestId && <small className="proposal-log-id">日志编号：{proposal.requestId}</small>}<button className="accept-button" onClick={onApply}><Check size={16} />接受并写入</button></div>;
 }
 
 function Field({ label, value, onChange, multiline, options }: { label: string; value: string; onChange: (value: string) => void; multiline?: boolean; options?: Array<{ label: string; value: string }> }) {
