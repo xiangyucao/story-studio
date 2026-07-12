@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildStoryContext } from "./context";
+import { buildStoryContext, referenceStyleExcerpt } from "./context";
 import type { Workspace } from "./types";
 
 const workspace: Workspace = {
   projects: [],
-  project: { id: "p", title: "测试作品", genre: "悬疑", premise: "寻找失踪者", styleGuide: "限制视角", createdAt: "", updatedAt: "" },
+  project: { id: "p", title: "测试作品", genre: "悬疑", premise: "寻找失踪者", styleGuide: "限制视角", referenceTitle: "风格范本.md", referenceText: "雨落在旧窗上，声音很轻。", createdAt: "", updatedAt: "" },
   outline: [
     { id: "o", projectId: "p", parentId: null, type: "chapter", title: "第二章", summary: "取得钥匙", position: 0, status: "planned", revision: 1 },
     { id: "s", projectId: "p", parentId: "o", type: "scene", title: "修理铺试探", summary: "林月观察陈叔的回避", position: 1, status: "planned", revision: 1 },
@@ -34,9 +34,23 @@ describe("buildStoryContext", () => {
     expect(context).toContain("原因：受人委托");
     expect(context).toContain("结果：可以进入仓库");
     expect(context).toContain("修理铺试探");
+    expect(context).toContain("《风格范本.md》");
+    expect(context).toContain("雨落在旧窗上");
+    expect(context).toContain("不得复制其中的人物、情节、专有名词或原句");
   });
 
   it("排除未标记为硬设定的条目", () => {
     expect(buildStoryContext(workspace, "c2")).not.toContain("废弃设定");
   });
+});
+
+it("从长范本均匀抽取开头、中段和结尾", () => {
+  const sample = `${"甲".repeat(100)}${"乙".repeat(100)}${"丙".repeat(100)}`;
+  const excerpt = referenceStyleExcerpt(sample, 90);
+  expect(excerpt).toContain("【范本开头】");
+  expect(excerpt).toContain("【范本中段】");
+  expect(excerpt).toContain("【范本结尾】");
+  expect(excerpt).toContain("甲");
+  expect(excerpt).toContain("乙");
+  expect(excerpt).toContain("丙");
 });

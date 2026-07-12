@@ -116,6 +116,7 @@ export function StoryStudio() {
   const characterImportInputRef = useRef<HTMLInputElement>(null);
   const worldImportInputRef = useRef<HTMLInputElement>(null);
   const timelineImportInputRef = useRef<HTMLInputElement>(null);
+  const referenceImportInputRef = useRef<HTMLInputElement>(null);
   const [settings, setSettings] = useState<ModelSettings>(() => {
     if (typeof window === "undefined") return defaultSettings;
     const saved = localStorage.getItem("story-studio-model-settings");
@@ -575,6 +576,23 @@ export function StoryStudio() {
     }
   };
 
+  const importReferenceWork = async (file?: File) => {
+    if (!file || !projectDraft) return;
+    try {
+      if (file.size > 2 * 1024 * 1024) throw new Error("参考作品文件不能超过 2 MB；可截取有代表性的章节后再上传");
+      const referenceText = (await file.text()).trim();
+      if (!referenceText) throw new Error("参考作品文件没有可读取的文字");
+      const next = { ...projectDraft, referenceTitle: file.name, referenceText };
+      setProjectDraft(next);
+      const result = await mutate("save-project", next as unknown as Record<string, unknown>);
+      if (result) setMessage(`已载入并保存参考范本《${file.name}》，AI 将抽取代表片段学习风格`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "参考作品读取失败");
+    } finally {
+      if (referenceImportInputRef.current) referenceImportInputRef.current.value = "";
+    }
+  };
+
   const wordCount = useMemo(() => chapterDraft?.content.replace(/\s/g, "").length ?? 0, [chapterDraft?.content]);
   const activeChapterOutline = useMemo(() => workspace?.outline.find((node) => node.id === chapterDraft?.outlineNodeId) ?? null, [workspace?.outline, chapterDraft?.outlineNodeId]);
   const activeChapterScenes = useMemo(() => activeChapterOutline ? workspace?.outline.filter((node) => node.type === "scene" && node.parentId === activeChapterOutline.id) ?? [] : [], [workspace?.outline, activeChapterOutline]);
@@ -666,8 +684,8 @@ export function StoryStudio() {
         )}
 
         {activeTab === "outline" && (
-          <ContentPage eyebrow="STRUCTURE" title="故事大纲" description="先确定卷、章和场景，再进入写作扩展；每个节点都可以独立修改。" action={<button className="primary-button" onClick={() => { setAiAction("outline"); setOutlineVolumeCount(7); setAiInstruction(""); setProposal(null); setAiError(""); setOverallOutlineOpen(true); }}><Sparkles size={17} />用 AI 构思整体大纲</button>}>
-            {projectDraft && <div className="project-foundation"><div className="section-heading"><div><span className="eyebrow">STORY FOUNDATION</span><h2>作品基石</h2></div><button className="primary-button small" onClick={() => void mutate("save-project", projectDraft as unknown as Record<string, unknown>)}><Save size={15} />保存</button></div><div className="foundation-grid"><Field label="作品名" value={projectDraft.title} onChange={(title) => setProjectDraft({ ...projectDraft, title })} /><Field label="类型" value={projectDraft.genre} onChange={(genre) => setProjectDraft({ ...projectDraft, genre })} /></div><Field label="核心构想" value={projectDraft.premise} multiline onChange={(premise) => setProjectDraft({ ...projectDraft, premise })} /><Field label="写作规则 / 风格指南" value={projectDraft.styleGuide} multiline onChange={(styleGuide) => setProjectDraft({ ...projectDraft, styleGuide })} /></div>}
+          <ContentPage eyebrow="STRUCTURE" title="故事大纲" description="先确定卷、章和场景，再进入写作扩展；每个节点都可以独立修改。" action={<div className="page-actions"><button className="secondary-button" onClick={() => referenceImportInputRef.current?.click()}><Upload size={16} />上传参考作品</button><button className="primary-button" onClick={() => { setAiAction("outline"); setOutlineVolumeCount(7); setAiInstruction(""); setProposal(null); setAiError(""); setOverallOutlineOpen(true); }}><Sparkles size={17} />用 AI 构思整体大纲</button></div>}>
+            {projectDraft && <div className="project-foundation"><div className="section-heading"><div><span className="eyebrow">STORY FOUNDATION</span><h2>作品基石</h2></div><button className="primary-button small" onClick={() => void mutate("save-project", projectDraft as unknown as Record<string, unknown>)}><Save size={15} />保存</button></div><div className="foundation-grid"><Field label="作品名" value={projectDraft.title} onChange={(title) => setProjectDraft({ ...projectDraft, title })} /><Field label="类型" value={projectDraft.genre} onChange={(genre) => setProjectDraft({ ...projectDraft, genre })} /></div><Field label="核心构想" value={projectDraft.premise} multiline onChange={(premise) => setProjectDraft({ ...projectDraft, premise })} /><Field label="写作规则 / 风格指南" value={projectDraft.styleGuide} multiline onChange={(styleGuide) => setProjectDraft({ ...projectDraft, styleGuide })} /><div className="reference-sample"><div className="reference-sample-head"><div><span className="eyebrow">STYLE REFERENCE</span><strong>参考范本 / 参考片段</strong><small>AI 只学习叙事视角、句式、节奏和氛围，不继承范本的人物与剧情。</small></div><input ref={referenceImportInputRef} className="visually-hidden" type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => void importReferenceWork(event.target.files?.[0])} /><button className="secondary-button small" onClick={() => referenceImportInputRef.current?.click()}><Upload size={15} />{projectDraft.referenceText ? "更换作品" : "上传作品"}</button></div>{projectDraft.referenceTitle && <div className="reference-file"><FileText size={15} /><span>{projectDraft.referenceTitle} · {projectDraft.referenceText.length.toLocaleString()} 字符</span><button className="text-button" onClick={() => setProjectDraft({ ...projectDraft, referenceTitle: "", referenceText: "" })}>清空</button></div>}<Field label="范本内容" value={projectDraft.referenceText} multiline onChange={(referenceText) => setProjectDraft({ ...projectDraft, referenceText })} /></div></div>}
             <div className="outline-grid">
               <div className="outline-tree">
                 <div className="outline-tree-header"><div><span className="eyebrow">OUTLINE TREE</span><strong>卷 · 章 · 场景</strong></div><button className="secondary-button" onClick={() => setNodeCreateDraft({ type: "volume", parentId: null, afterId: workspace.outline.at(-1)?.id || null, title: `第${workspace.outline.filter((node) => node.type === "volume").length + 1}卷`, summary: "", heading: "添加新卷" })}><CirclePlus size={15} />添加卷</button></div>

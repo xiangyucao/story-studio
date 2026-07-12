@@ -4,6 +4,8 @@ export type Project = {
   genre: string;
   premise: string;
   styleGuide: string;
+  referenceTitle: string;
+  referenceText: string;
   createdAt: string;
   updatedAt: string;
 };

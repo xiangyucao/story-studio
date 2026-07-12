@@ -145,6 +145,15 @@ button { cursor: pointer; }
 .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 .outline-grid, .character-layout, .world-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 22px; }
 .project-foundation { margin-bottom: 22px; padding: 22px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
+.reference-sample { margin-top: 17px; padding-top: 17px; border-top: 1px solid var(--line); }
+.reference-sample-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.reference-sample-head strong, .reference-sample-head small { display: block; }
+.reference-sample-head strong { margin-top: 3px; font-family: Georgia, "Noto Serif SC", serif; font-size: 15px; }
+.reference-sample-head small { margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.reference-file { display: flex; align-items: center; gap: 8px; margin: 8px 0; padding: 9px 11px; color: var(--muted); background: #f4efe8; border-radius: 7px; font-size: 10px; }
+.reference-file svg { color: var(--accent); }
+.reference-file span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reference-sample .field textarea { min-height: 150px; }
 .foundation-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
 .outline-tree, .detail-editor, .inline-ai-card, .logic-result { padding: 22px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
 .outline-tree-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 7px 14px; border-bottom: 1px solid #eee8df; }
