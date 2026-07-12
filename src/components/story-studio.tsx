@@ -368,6 +368,20 @@ export function StoryStudio() {
             method: "POST",
             body: JSON.stringify({ action: "save-chapter", payload: { ...chapter, content: proposal.result, instruction: "AI 批量按大纲扩写", clearOutlineStale: true } }),
           });
+          const savedChapter = {
+            ...chapter,
+            content: proposal.result,
+            wordCount: proposal.result.replace(/\s/g, "").length,
+            outlineStale: false,
+            updatedAt: new Date().toISOString(),
+          };
+          // SQLite 已逐章保存；同时更新客户端快照，让用户在批量任务运行期间
+          // 就能从章节树打开刚生成的正文，无需等整批完成或手动刷新。
+          setWorkspace((current) => current ? {
+            ...current,
+            chapters: current.chapters.map((item) => item.id === savedChapter.id ? savedChapter : item),
+          } : current);
+          setChapterDraft((current) => current?.id === savedChapter.id ? savedChapter : current);
           succeeded += 1;
         } catch (error) {
           failed += 1;
