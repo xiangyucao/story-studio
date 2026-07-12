@@ -4,7 +4,7 @@
 import {
   AlertTriangle, BookOpen, Bot, BrainCircuit, Check, ChevronDown, ChevronRight, CirclePlus, Clock3,
   Download, FileText, FileType2, GitBranch, History, ImagePlus, LoaderCircle,
-  Network, Printer, Save, Search, Settings, Sparkles, Users, WandSparkles, X,
+  Network, Printer, Save, Search, Settings, Sparkles, Trash2, Users, WandSparkles, X,
   Upload,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -388,6 +388,25 @@ export function StoryStudio() {
     }
   };
 
+  const deleteCurrentProject = async () => {
+    if (!workspace || workspace.projects.length <= 1) return;
+    const chapterCount = workspace.chapters.length;
+    const wordTotal = workspace.chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0);
+    if (!window.confirm(`确认永久删除《${workspace.project.title}》？\n\n将同时删除 ${chapterCount} 个章节、${wordTotal.toLocaleString()} 字正文，以及本作品的大纲、人物、关系、设定、时间线、版本和插画。此操作不能撤销。`)) return;
+    const nextProjectId = await mutate("delete-project", { id: workspace.project.id }, false);
+    if (!nextProjectId) return;
+    setSelectedChapterId("");
+    setSelectedCharacterId("");
+    setSelectedRelationshipId("");
+    setSelectedOutlineId("");
+    setSelectedWorldId("");
+    setSelectedEventId("");
+    setProposal(null);
+    await loadWorkspace(nextProjectId);
+    setActiveTab("outline");
+    setMessage(`《${workspace.project.title}》已删除`);
+  };
+
   const uploadIllustration = async (file: File) => {
     if (!workspace || !chapterDraft) return;
     const form = new FormData();
@@ -592,7 +611,7 @@ export function StoryStudio() {
           <span className="eyebrow">当前作品</span>
           <div className="project-select-row"><select value={workspace.project.id} onChange={(event) => void loadWorkspace(event.target.value)}>
             {workspace.projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
-          </select><button className="tiny-button" title="新建作品" onClick={() => { setNewProjectTitle(""); setNewProjectOpen(true); }}><CirclePlus size={16} /></button></div>
+          </select><button className="tiny-button" title="新建作品" onClick={() => { setNewProjectTitle(""); setNewProjectOpen(true); }}><CirclePlus size={16} /></button><button className="tiny-button project-delete-button" title={workspace.projects.length <= 1 ? "至少保留一个作品" : `删除《${workspace.project.title}》`} disabled={workspace.projects.length <= 1 || busy} onClick={() => void deleteCurrentProject()}><Trash2 size={15} /></button></div>
         </div>
         <div className="top-actions">
           {message && <span className="status-message">{message}</span>}

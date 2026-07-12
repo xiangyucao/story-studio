@@ -338,6 +338,22 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
     case "save-project":
       db.prepare("UPDATE projects SET title=?, genre=?, premise=?, style_guide=?, updated_at=? WHERE id=?").run(payload.title, payload.genre, payload.premise, payload.styleGuide, timestamp, payload.id);
       return payload.id;
+    case "delete-project": {
+      const projectId = String(payload.id || "");
+      const project = db.prepare("SELECT id FROM projects WHERE id=?").get(projectId) as { id: string } | undefined;
+      if (!project) throw new Error("要删除的作品不存在");
+      const count = db.prepare("SELECT COUNT(*) AS count FROM projects").get() as { count: number };
+      if (count.count <= 1) throw new Error("至少需要保留一个作品，请先新建作品再删除当前作品");
+      const next = db.prepare("SELECT id FROM projects WHERE id<>? ORDER BY updated_at DESC LIMIT 1").get(projectId) as { id: string };
+      const assets = db.prepare("SELECT stored_name FROM illustrations WHERE project_id=?").all(projectId) as Array<{ stored_name: string }>;
+      db.prepare("DELETE FROM projects WHERE id=?").run(projectId);
+      const uploadDir = path.join(dataDir, "uploads");
+      assets.forEach(({ stored_name }) => {
+        if (path.basename(stored_name) !== stored_name) return;
+        try { fs.unlinkSync(path.join(uploadDir, stored_name)); } catch { /* 文件可能已被手动移除。 */ }
+      });
+      return next.id;
+    }
     case "create-chapter": {
       const chapterId = id();
       const max = db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM chapters WHERE project_id=?").get(payload.projectId) as { p: number };
