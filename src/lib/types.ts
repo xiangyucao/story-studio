@@ -30,6 +30,7 @@ export type Chapter = {
   status: string;
   position: number;
   wordCount: number;
+  targetWordCount: number;
   outlineStale: boolean;
   basedOnOutlineRevision: number;
   updatedAt: string;
@@ -115,7 +116,7 @@ export type Workspace = {
 };
 
 export type ModelSettings = {
-  provider: "openai" | "openai-compatible";
+  provider: "openai" | "openai-compatible" | "manual";
   model: string;
   baseUrl?: string;
 };

@@ -25,6 +25,7 @@ export function buildStoryContext(workspace: Workspace, chapterId?: string) {
     `\n硬设定：\n${workspace.worldEntries.filter((w) => w.isCanon).map((w) => `- [${w.category}] ${w.name}：${w.description}`).join("\n")}`,
     `\n事件链：\n${workspace.events.map((e) => `- ${e.storyTime} ${e.title}${e.chapterTitle ? `（${e.chapterTitle}）` : ""}：${e.description}；原因：${e.causes}；结果：${e.consequences}`).join("\n")}`,
     `\n当前章节场景：\n${chapterScenes.length ? chapterScenes.map((scene) => `- ${scene.title}：${scene.summary}`).join("\n") : "未单独拆分场景"}`,
+    chapter ? `\n当前章节建议字数：${chapter.targetWordCount || 3000} 字` : "",
     `\n插画说明：\n${workspace.illustrations.map((image) => `- ${workspace.chapters.find((chapter) => chapter.id === image.chapterId)?.title || "章节"}：${image.caption || image.fileName}`).join("\n")}`,
     `\n相关章节：\n${nearby.map((c) => `### [${nearbyLabel(c)}] ${c.title}\n摘要：${c.summary}\n${c.content.slice(-5000)}`).join("\n\n")}`,
   ].join("\n");

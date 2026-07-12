@@ -29,6 +29,7 @@ export const outlineNodeProposalSchema = z.object({
 });
 
 function clientFor(settings: ModelSettings) {
+  if (settings.provider === "manual") throw new Error("当前选择的是外部手动模型，请复制提示词并粘贴返回结果");
   if (settings.provider === "openai") {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) throw new Error("尚未配置 OPENAI_API_KEY。请复制 .env.example 为 .env.local 并填入密钥。");

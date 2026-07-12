@@ -5,6 +5,7 @@ import { buildStoryContext } from "@/lib/context";
 import { generateOutline, generateOutlineNode, generateText, generateVolumeExpansion } from "@/lib/models";
 import { writeAiLog } from "@/lib/ai-log";
 import { hasWrongChapterHeading } from "@/lib/chapter-target";
+import { buildManualAiPrompt } from "@/lib/manual-ai";
 import type { ModelSettings } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -21,6 +22,7 @@ export async function POST(request: NextRequest) {
       instruction: string;
       selection?: string;
       count?: number;
+      targetWordCount?: number;
       settings: ModelSettings;
     };
     if (!body.instruction?.trim()) return NextResponse.json({ error: "请输入对 AI 的要求" }, { status: 400 });
@@ -45,6 +47,24 @@ export async function POST(request: NextRequest) {
     writeAiLog({ ...logBase, stage: "request" });
     const context = buildStoryContext(workspace, body.chapterId);
     const count = Math.max(1, Math.min(20, Math.round(Number(body.count) || 7)));
+    const effectiveTargetWordCount = Math.max(300, Math.min(50000, Math.round(Number(body.targetWordCount) || targetChapter?.targetWordCount || 3000)));
+    if (body.settings.provider === "manual") {
+      const prompt = buildManualAiPrompt({
+        action: body.action,
+        context,
+        instruction: body.instruction,
+        selection: body.selection,
+        count,
+        targetChapter: targetChapter ? {
+          id: targetChapter.id,
+          title: targetChapter.title,
+          summary: targetOutline?.summary || targetChapter.summary,
+          targetWordCount: effectiveTargetWordCount,
+        } : undefined,
+      });
+      writeAiLog({ ...logBase, stage: "manual-prompt", promptLength: prompt.length });
+      return NextResponse.json({ type: "manual", action: body.action, prompt, targetChapterId: targetChapter?.id, targetChapterTitle: targetChapter?.title, requestId });
+    }
     if (body.action === "outline") {
       const proposal = await generateOutline(body.settings, context, body.instruction, count);
       writeAiLog({ ...logBase, stage: "complete", nodeCount: proposal.nodes.length });
@@ -61,7 +81,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ type: "outline-node", proposal, requestId });
     }
     if (!targetChapter) throw new Error("当前目标章节不存在，请重新选择章节后再试");
-    const targetBlock = `【唯一目标章节】\n章节 ID：${targetChapter.id}\n章节标题：${targetChapter.title}\n章节大纲：${targetOutline?.summary || targetChapter.summary || "未填写"}\n硬性要求：只能处理这一章。相邻章节仅供衔接，绝不能把上一章或下一章当成写作目标。`;
+    const targetBlock = `【唯一目标章节】\n章节 ID：${targetChapter.id}\n章节标题：${targetChapter.title}\n章节大纲：${targetOutline?.summary || targetChapter.summary || "未填写"}\n建议字数：约 ${effectiveTargetWordCount} 字（允许上下浮动约 15%）\n硬性要求：只能处理这一章。相邻章节仅供衔接，绝不能把上一章或下一章当成写作目标。`;
     const task = body.action === "expand"
       ? `根据资料展开《${targetChapter.title}》。只能写这一章；如果输出章节标题，必须与“${targetChapter.title}”一致。只输出可直接进入正文的中文文本，不解释过程。`
       : body.action === "logic"

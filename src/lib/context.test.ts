@@ -10,8 +10,8 @@ const workspace: Workspace = {
     { id: "s", projectId: "p", parentId: "o", type: "scene", title: "修理铺试探", summary: "林月观察陈叔的回避", position: 1, status: "planned", revision: 1 },
   ],
   chapters: [
-    { id: "c1", projectId: "p", outlineNodeId: null, title: "第一章", content: "旧内容", summary: "收到信", status: "draft", position: 0, wordCount: 3, outlineStale: false, basedOnOutlineRevision: 1, updatedAt: "" },
-    { id: "c2", projectId: "p", outlineNodeId: "o", title: "第二章", content: "当前内容", summary: "找到钥匙", status: "draft", position: 1, wordCount: 4, outlineStale: false, basedOnOutlineRevision: 1, updatedAt: "" },
+    { id: "c1", projectId: "p", outlineNodeId: null, title: "第一章", content: "旧内容", summary: "收到信", status: "draft", position: 0, wordCount: 3, targetWordCount: 3000, outlineStale: false, basedOnOutlineRevision: 1, updatedAt: "" },
+    { id: "c2", projectId: "p", outlineNodeId: "o", title: "第二章", content: "当前内容", summary: "找到钥匙", status: "draft", position: 1, wordCount: 4, targetWordCount: 3000, outlineStale: false, basedOnOutlineRevision: 1, updatedAt: "" },
   ],
   characters: [{ id: "a", projectId: "p", name: "林月", role: "主角", description: "记者", goal: "找父亲", fear: "记忆错误", secret: "见过仓库", voice: "短句", status: "active" }],
   relationships: [],

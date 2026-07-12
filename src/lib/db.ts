@@ -63,6 +63,7 @@ db.exec(`
     status TEXT NOT NULL DEFAULT 'draft',
     position INTEGER NOT NULL DEFAULT 0,
     word_count INTEGER NOT NULL DEFAULT 0,
+    target_word_count INTEGER NOT NULL DEFAULT 3000,
     outline_stale INTEGER NOT NULL DEFAULT 0,
     based_on_outline_revision INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
@@ -139,6 +140,7 @@ function ensureColumn(table: string, column: string, definition: string) {
 ensureColumn("outline_nodes", "revision", "INTEGER NOT NULL DEFAULT 1");
 ensureColumn("chapters", "outline_stale", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("chapters", "based_on_outline_revision", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("chapters", "target_word_count", "INTEGER NOT NULL DEFAULT 3000");
 db.exec(`
   UPDATE chapters
   SET outline_node_id = (
@@ -220,7 +222,7 @@ export function getWorkspace(projectId?: string): Workspace {
   const chapters = (db.prepare("SELECT * FROM chapters WHERE project_id = ? ORDER BY position, rowid").all(project.id) as Row[]).map((r): Chapter => ({
     id: String(r.id), projectId: String(r.project_id), outlineNodeId: r.outline_node_id ? String(r.outline_node_id) : null,
     title: String(r.title), content: String(r.content), summary: String(r.summary), status: String(r.status),
-    position: Number(r.position), wordCount: Number(r.word_count), outlineStale: Boolean(r.outline_stale),
+    position: Number(r.position), wordCount: Number(r.word_count), targetWordCount: Number(r.target_word_count || 3000), outlineStale: Boolean(r.outline_stale),
     basedOnOutlineRevision: Number(r.based_on_outline_revision), updatedAt: String(r.updated_at),
   }));
   const characters = (db.prepare("SELECT * FROM characters WHERE project_id = ? ORDER BY rowid").all(project.id) as Row[]).map((r): Character => ({
@@ -348,7 +350,8 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
     case "save-chapter": {
       const previous = db.prepare("SELECT content, project_id FROM chapters WHERE id=?").get(payload.id) as { content: string; project_id: string };
       const content = String(payload.content ?? "");
-      db.prepare("UPDATE chapters SET title=?, content=?, summary=?, status=?, word_count=?, updated_at=? WHERE id=?").run(payload.title, content, payload.summary ?? "", payload.status ?? "draft", content.replace(/\s/g, "").length, timestamp, payload.id);
+      const targetWordCount = Math.max(300, Math.min(50000, Math.round(Number(payload.targetWordCount) || 3000)));
+      db.prepare("UPDATE chapters SET title=?, content=?, summary=?, status=?, word_count=?, target_word_count=?, updated_at=? WHERE id=?").run(payload.title, content, payload.summary ?? "", payload.status ?? "draft", content.replace(/\s/g, "").length, targetWordCount, timestamp, payload.id);
       if (payload.clearOutlineStale) {
         db.prepare(`UPDATE chapters SET outline_stale=0, based_on_outline_revision=COALESCE(
           (SELECT revision FROM outline_nodes WHERE id=chapters.outline_node_id), based_on_outline_revision
