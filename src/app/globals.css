@@ -136,7 +136,8 @@ button { cursor: pointer; }
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 25px; margin-bottom: 30px; }
 .page-header h1 { margin: 6px 0 5px; font-family: Georgia, "Noto Serif SC", serif; font-size: 34px; }
 .page-header p { margin: 0; color: var(--muted); font-size: 13px; }
-.page-actions { display: flex; align-items: center; gap: 8px; }
+.page-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.example-button { display: inline-flex; align-items: center; gap: 5px; }
 .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 .outline-grid, .character-layout, .world-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 22px; }
 .project-foundation { margin-bottom: 22px; padding: 22px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
@@ -213,6 +214,7 @@ button { cursor: pointer; }
 .import-status { padding: 4px 5px; color: #fff; background: var(--sage); border-radius: 9px; font-size: 9px; text-align: center; }
 .import-status.update { color: #8d4c3d; background: #f5ddd6; }
 .import-status.relation { color: #655d91; background: #e9e6f5; }
+.json-example-code { max-height: 55vh; margin: 14px 0 18px; padding: 16px; overflow: auto; color: #433d36; background: #f4efe8; border: 1px solid var(--line); border-radius: 9px; font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; line-height: 1.65; white-space: pre; }
 
 .world-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .world-card { min-height: 160px; padding: 20px; background: var(--paper); border: 1px solid var(--line); border-radius: 11px; }

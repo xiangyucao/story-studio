@@ -20,6 +20,37 @@ export type CharacterImportData = {
   relationships: ImportedRelationship[];
 };
 
+export const characterImportExample: CharacterImportData = {
+  characters: [
+    {
+      name: "林弦",
+      role: "主角 / 精密机械技师",
+      description: "患有严重失眠症，对机械结构有近乎病态的直觉。",
+      goal: "寻找世界的真相",
+      fear: "真实世界已经无法挽救",
+      secret: "意识载体存在兼容性裂缝",
+      voice: "疲惫、克制，习惯用机械结构作比喻",
+    },
+    {
+      name: "林弦的父亲",
+      role: "线索人物",
+      description: "留下城市异常坐标笔记的观测者。",
+      goal: "记录系统逻辑坏道",
+      fear: "自己的记忆被系统修剪",
+      secret: "并非走失，而是跌入逻辑漏洞",
+      voice: "偏执、精确",
+    },
+  ],
+  relationships: [
+    {
+      sourceName: "林弦的父亲",
+      targetName: "林弦",
+      type: "父子 / 精神引导",
+      description: "是林弦探寻真相的重要线索来源。",
+    },
+  ],
+};
+
 export const normalizeCharacterName = (name: string) => name.trim().toLocaleLowerCase();
 
 function objectValue(value: unknown, label: string): Record<string, unknown> {

@@ -16,6 +16,7 @@ import type {
   WorldEntry,
 } from "./types";
 import { normalizeCharacterImportData, normalizeCharacterName } from "./character-import";
+import { normalizeWorldEntryName, normalizeWorldImportData } from "./world-import";
 
 const dataDir = process.env.STORY_STUDIO_DATA_DIR
   ? path.resolve(process.env.STORY_STUDIO_DATA_DIR)
@@ -445,6 +446,50 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
     case "delete-world":
       db.prepare("DELETE FROM world_entries WHERE id=?").run(payload.id);
       return payload.id;
+    case "import-world-json": {
+      const projectId = String(payload.projectId || "");
+      if (!projectId) throw new Error("缺少作品编号");
+      const imported = normalizeWorldImportData(payload.data);
+      return db.transaction(() => {
+        type WorldRow = { id: string; name: string; category: string; description: string; is_canon: number };
+        const rows = db.prepare("SELECT id, name, category, description, is_canon FROM world_entries WHERE project_id=?").all(projectId) as WorldRow[];
+        const entriesByName = new Map(rows.map((row) => [normalizeWorldEntryName(row.name), row]));
+        let created = 0;
+        let updated = 0;
+        imported.worldEntries.forEach((entry) => {
+          const key = normalizeWorldEntryName(entry.name);
+          const existing = entriesByName.get(key);
+          if (existing) {
+            const merged = {
+              name: entry.name,
+              category: entry.category || existing.category,
+              description: entry.description || existing.description,
+              is_canon: entry.isCanon == null ? existing.is_canon : entry.isCanon ? 1 : 0,
+            };
+            db.prepare("UPDATE world_entries SET name=?, category=?, description=?, is_canon=? WHERE id=?").run(
+              merged.name, merged.category, merged.description, merged.is_canon, existing.id,
+            );
+            entriesByName.set(key, { ...existing, ...merged });
+            updated += 1;
+          } else {
+            const entryId = id();
+            const createdEntry = {
+              id: entryId,
+              name: entry.name,
+              category: entry.category || "背景",
+              description: entry.description,
+              is_canon: entry.isCanon === false ? 0 : 1,
+            };
+            db.prepare("INSERT INTO world_entries VALUES (?, ?, ?, ?, ?, ?)").run(
+              createdEntry.id, projectId, createdEntry.category, createdEntry.name, createdEntry.description, createdEntry.is_canon,
+            );
+            entriesByName.set(key, createdEntry);
+            created += 1;
+          }
+        });
+        return `新增 ${created} 条设定，更新 ${updated} 条设定；未删除任何原有设定`;
+      })();
+    }
     case "create-event": {
       const eventId = id();
       db.prepare("INSERT INTO story_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(eventId, payload.projectId, payload.chapterId || null, payload.title || "新事件", payload.storyTime || "", payload.description || "", payload.causes || "", payload.consequences || "");
