@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { getWorkspace } from "@/lib/db";
 import { buildStoryContext } from "@/lib/context";
-import { generateOutline, generateOutlineNode, generateText, generateVolumeExpansion } from "@/lib/models";
+import { clearLocalModelContext, generateOutline, generateOutlineNode, generateText, generateVolumeExpansion } from "@/lib/models";
 import { writeAiLog } from "@/lib/ai-log";
 import { hasWrongChapterHeading } from "@/lib/chapter-target";
 import { buildManualAiPrompt } from "@/lib/manual-ai";
@@ -64,6 +64,10 @@ export async function POST(request: NextRequest) {
       });
       writeAiLog({ ...logBase, stage: "manual-prompt", promptLength: prompt.length });
       return NextResponse.json({ type: "manual", action: body.action, prompt, targetChapterId: targetChapter?.id, targetChapterTitle: targetChapter?.title, requestId });
+    }
+    if (body.settings.provider === "openai-compatible") {
+      const contextClear = await clearLocalModelContext(body.settings);
+      writeAiLog({ ...logBase, stage: "local-context-clear", ...contextClear });
     }
     if (body.action === "outline") {
       const proposal = await generateOutline(body.settings, context, body.instruction, count);

@@ -4,6 +4,43 @@ import { z } from "zod";
 import { zodTextFormat } from "openai/helpers/zod";
 import type { ModelSettings } from "./types";
 
+function localServerRoot(baseUrl?: string) {
+  const url = new URL(baseUrl || process.env.LOCAL_MODEL_BASE_URL || "http://127.0.0.1:11434/v1");
+  url.pathname = url.pathname.replace(/\/v1\/?$/, "").replace(/\/$/, "");
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
+export async function clearLocalModelContext(settings: ModelSettings) {
+  if (settings.provider !== "openai-compatible") return { supported: false, clearedSlots: 0, erasedTokens: 0 };
+  const root = localServerRoot(settings.baseUrl);
+  try {
+    const slotsResponse = await fetch(`${root}/slots`, { signal: AbortSignal.timeout(3000), cache: "no-store" });
+    if (!slotsResponse.ok) return { supported: false, clearedSlots: 0, erasedTokens: 0 };
+    const raw = await slotsResponse.json() as unknown;
+    const slots = (Array.isArray(raw) ? raw : [raw]) as Array<{ id?: number; is_processing?: boolean; n_prompt_tokens?: number }>;
+    const idle = slots.filter((slot) => Number.isInteger(slot.id) && !slot.is_processing && Number(slot.n_prompt_tokens || 0) > 0);
+    let clearedSlots = 0;
+    let erasedTokens = 0;
+    for (const slot of idle) {
+      const response = await fetch(`${root}/slots/${slot.id}?action=erase`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) continue;
+      const result = await response.json() as { n_erased?: number };
+      clearedSlots += 1;
+      erasedTokens += Number(result.n_erased || slot.n_prompt_tokens || 0);
+    }
+    return { supported: idle.length === 0 || clearedSlots > 0, clearedSlots, erasedTokens };
+  } catch {
+    return { supported: false, clearedSlots: 0, erasedTokens: 0 };
+  }
+}
+
 export const outlineProposalSchema = z.object({
   rationale: z.string(),
   nodes: z.array(z.object({
