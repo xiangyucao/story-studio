@@ -21,14 +21,11 @@ describe("manual external AI workflow", () => {
     expect(result.type).toBe("outline");
   });
 
-  it("builds and parses a reference foundation analysis", () => {
-    const prompt = buildManualAiPrompt({ action: "foundation", context: "参考范本：冷峻短句", instruction: "反推作品基石" });
-    expect(prompt).toContain("不得复制范本人物、剧情");
-    const result = parseManualAiResponse("foundation", '{"rationale":"节奏克制","genre":"心理悬疑","premise":"陌生城市中的身份追索","styleGuide":"限制视角；短句；少用解释"}');
-    expect(result).toEqual({
-      type: "foundation",
-      proposal: { rationale: "节奏克制", genre: "心理悬疑", premise: "陌生城市中的身份追索", styleGuide: "限制视角；短句；少用解释" },
-    });
+  it("整体大纲会在作品基石缺失时从范本推断", () => {
+    const prompt = buildManualAiPrompt({ action: "outline", context: "类型：未设定\n核心构想：未设定\n参考范本：冷峻悬疑片段", instruction: "创作新故事", count: 7 });
+    expect(prompt).toContain("字段为空或未设定");
+    expect(prompt).toContain("从参考范本中推断");
+    expect(prompt).toContain("不得复制范本人物、情节");
   });
 
   it("为外部模型生成基于全文判断的精简范本指令", () => {

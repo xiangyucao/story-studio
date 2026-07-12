@@ -1,6 +1,4 @@
-import { normalizeFoundationProposal } from "./foundation-proposal";
-
-export type ManualAiAction = "outline" | "outline-volume" | "outline-node" | "foundation" | "compact-reference" | "expand" | "revise" | "logic";
+export type ManualAiAction = "outline" | "outline-volume" | "outline-node" | "compact-reference" | "expand" | "revise" | "logic";
 
 export type ManualAiRequest = {
   action: ManualAiAction;
@@ -16,20 +14,18 @@ export type ManualParsedProposal =
   | { type: "text"; result: string; targetChapterId?: string }
   | { type: "outline"; proposal: { rationale: string; nodes: Array<{ type: "volume"; title: string; summary: string }> } }
   | { type: "outline-volume"; proposal: { rationale: string; nodes: Array<{ type: "chapter" | "scene"; title: string; summary: string }> } }
-  | { type: "outline-node"; proposal: { rationale: string; title: string; summary: string } }
-  | { type: "foundation"; proposal: { rationale: string; genre: string; premise: string; styleGuide: string } };
+  | { type: "outline-node"; proposal: { rationale: string; title: string; summary: string } };
 
 const structuredOutput = (action: ManualAiAction, count: number) => {
   if (action === "outline") return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"设计说明","nodes":[{"type":"volume","title":"第一卷：标题","summary":"本卷介绍"}]}\n必须恰好包含 ${count} 个 volume 节点。`;
   if (action === "outline-volume") return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"设计说明","nodes":[{"type":"chapter","title":"第1章：标题","summary":"章节介绍"},{"type":"scene","title":"场景标题","summary":"场景介绍"}]}\n必须恰好包含 ${count} 个 chapter；scene 可选并紧跟所属章。`;
-  if (action === "foundation") return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"分析说明","genre":"类型","premise":"新的核心构想方向","styleGuide":"具体写作规则与风格指南"}`;
   return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"修改说明","title":"修改后的标题","summary":"修改后的摘要"}`;
 };
 
 export function buildManualAiPrompt(request: ManualAiRequest) {
   const count = Math.max(1, Math.min(20, Math.round(request.count || 7)));
   if (request.action === "outline") return [
-    "你是长篇小说总纲编辑。请严格尊重资料中的人物、关系、硬设定和事件因果。只规划卷级结构，不写章节或正文。",
+    "你是长篇小说总纲编辑。请严格尊重资料中的人物、关系、硬设定和事件因果。类型、核心构想和写作规则如已填写则优先遵守；如有字段为空或未设定，则从参考范本中推断题材方向、核心驱动力和文体特征后直接创作新故事。不得复制范本人物、情节、专有名词或原句。只规划卷级结构，不写章节或正文。",
     `【作品资料】\n${request.context}`,
     `【用户要求】\n${request.instruction}`,
     `【输出格式】\n${structuredOutput("outline", count)}`,
@@ -47,12 +43,6 @@ export function buildManualAiPrompt(request: ManualAiRequest) {
     `【当前节点】\n${request.selection || "未提供"}`,
     `【用户要求】\n${request.instruction}`,
     `【输出格式】\n${structuredOutput("outline-node", count)}`,
-  ].join("\n\n");
-  if (request.action === "foundation") return [
-    "你是小说策划与文体分析编辑。根据作品资料中的参考范本，反推适合当前新作品的类型、核心构想方向和可执行的写作风格指南。不得复制范本人物、剧情、专有名词或原句。",
-    `【作品资料与参考范本】\n${request.context}`,
-    `【用户要求】\n${request.instruction}`,
-    `【输出格式】\n${structuredOutput("foundation", count)}`,
   ].join("\n\n");
   if (request.action === "compact-reference") {
     const targetLength = Math.max(1000, Math.min(50000, Math.round(request.targetLength || 10000)));
@@ -100,10 +90,6 @@ export function parseManualAiResponse(action: ManualAiAction, response: string, 
   if (action === "outline-node") return {
     type: "outline-node",
     proposal: { rationale: text(value.rationale, "rationale"), title: text(value.title, "title"), summary: text(value.summary, "summary") },
-  };
-  if (action === "foundation") return {
-    type: "foundation",
-    proposal: normalizeFoundationProposal(value),
   };
   if (!Array.isArray(value.nodes)) throw new Error("nodes 必须是数组");
   const nodes = value.nodes.map((node, index) => {

@@ -3,7 +3,6 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { zodTextFormat } from "openai/helpers/zod";
 import type { ModelSettings } from "./types";
-import { normalizeFoundationProposal } from "./foundation-proposal";
 import { buildReferenceCandidates, selectReferenceCandidates } from "./reference-extraction";
 
 function localServerRoot(baseUrl?: string) {
@@ -72,12 +71,6 @@ export const outlineNodeProposalSchema = z.object({
   summary: z.string(),
 });
 
-export const foundationProposalSchema = z.object({
-  rationale: z.string(),
-  genre: z.string(),
-  premise: z.string(),
-  styleGuide: z.string(),
-});
 
 function clientFor(settings: ModelSettings) {
   if (settings.provider === "manual") throw new Error("当前选择的是外部手动模型，请复制提示词并粘贴返回结果");
@@ -113,7 +106,7 @@ export async function generateText(settings: ModelSettings, system: string, prom
 
 export async function generateOutline(settings: ModelSettings, context: string, instruction: string, volumeCount = 7) {
   const client = clientFor(settings);
-  const system = `你是长篇小说总纲编辑。严格尊重已有硬设定和事件因果。只规划全书的卷级结构，不规划章和场景，不写正文。必须恰好输出 ${volumeCount} 个 volume 节点，每卷都要有明确标题和介绍，依次覆盖故事的推进、转折与结局。`;
+  const system = `你是长篇小说总纲编辑。严格尊重已有硬设定和事件因果。作品资料中的类型、核心构想和写作规则如已填写，必须优先遵守；如有字段为空或未设定，则从参考范本的题材倾向、核心驱动力和文体特征中推断后直接用于新故事。参考范本只用于启发结构与风格，不得复制其中的人物、情节、专有名词或原句。只规划全书的卷级结构，不规划章和场景，不写正文。必须恰好输出 ${volumeCount} 个 volume 节点，每卷都要有明确标题和介绍，依次覆盖故事的推进、转折与结局。`;
   const input = `${context}\n\n用户要求：${instruction}\n\n再次确认：只输出 ${volumeCount} 卷，不要输出章或场景。`;
   if (settings.provider === "openai") {
     const response = await client.responses.parse({
@@ -177,26 +170,6 @@ export async function generateOutlineNode(settings: ModelSettings, context: stri
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("本地模型没有返回 JSON 节点提案");
   return outlineNodeProposalSchema.parse(JSON.parse(match[0]));
-}
-
-export async function generateFoundationFromReference(settings: ModelSettings, context: string, instruction: string) {
-  const client = clientFor(settings);
-  const system = "你是小说策划与文体分析编辑。根据参考范本反推适合当前新作品的类型、核心构想方向和可执行的写作风格指南。只能分析范本的结构与风格特征，不得复制范本的人物、情节、专有名词或原句。核心构想应是可供作者继续创作的新方向，而不是范本剧情摘要。";
-  const input = `${context}\n\n用户要求：${instruction}`;
-  if (settings.provider === "openai") {
-    const response = await client.responses.parse({
-      model: settings.model || process.env.OPENAI_MODEL || "gpt-5.4-mini",
-      instructions: system,
-      input,
-      text: { format: zodTextFormat(foundationProposalSchema, "foundation_proposal") },
-    });
-    if (!response.output_parsed) throw new Error("模型没有返回可解析的作品基石提案");
-    return response.output_parsed;
-  }
-  const raw = await generateText(settings, `${system} 必须只返回 JSON，格式为 {"rationale":"分析说明","genre":"类型","premise":"新的核心构想方向","styleGuide":"具体写作规则与风格指南"}`, input);
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("本地模型没有返回 JSON 作品基石提案");
-  return foundationProposalSchema.parse(normalizeFoundationProposal(JSON.parse(match[0])));
 }
 
 export async function generateReferenceSample(settings: ModelSettings, referenceText: string, targetLength = 10000) {
