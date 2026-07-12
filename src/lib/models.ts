@@ -4,6 +4,7 @@ import { z } from "zod";
 import { zodTextFormat } from "openai/helpers/zod";
 import type { ModelSettings } from "./types";
 import { normalizeFoundationProposal } from "./foundation-proposal";
+import { buildReferenceCandidates, selectReferenceCandidates } from "./reference-extraction";
 
 function localServerRoot(baseUrl?: string) {
   const url = new URL(baseUrl || process.env.LOCAL_MODEL_BASE_URL || "http://127.0.0.1:11434/v1");
@@ -195,16 +196,9 @@ export async function generateFoundationFromReference(settings: ModelSettings, c
 
 export async function generateReferenceSample(settings: ModelSettings, referenceText: string, targetLength = 10000) {
   const length = Math.max(1000, Math.min(50000, Math.round(targetLength || 10000)));
-  const system = "你是文学样本编辑。请从用户提供的参考作品原文中挑选最能代表其叙事视角、句式、节奏、氛围、对话和描写方式的段落。必须逐字保留原文，不得改写、概括、续写或添加评价；可以从原文不同位置选择多个完整段落，并保持各段内部原有顺序。";
-  const prompt = `目标：提取约 ${length} 个中文字的代表性范本（允许上下浮动 10%）。不要只固定选择开头、中段和结尾，应根据文体代表性判断。只输出选中的原文段落，段落组之间用“\n\n---\n\n”分隔。\n\n【完整参考作品原文】\n${referenceText}`;
-  const result = (await generateText(settings, system, prompt)).trim();
-  if (!result) throw new Error("模型没有返回精简范本");
-  const candidates = result.split(/\n\s*---\s*\n/).map((part) => part.trim()).filter(Boolean);
-  const verbatim = candidates.filter((part) => referenceText.includes(part));
-  const extracted = verbatim.join("\n\n---\n\n");
-  const minimumLength = Math.min(1000, Math.round(length * 0.3));
-  if (extracted.replace(/\s/g, "").length < minimumLength) {
-    throw new Error("模型返回的内容不是可验证的原文摘录，已保留当前范本。请重试或降低目标字数");
-  }
-  return extracted;
+  const candidates = buildReferenceCandidates(referenceText);
+  const system = "你是文学样本编辑。用户会提供带编号的原文段落。请选择最能代表其叙事视角、句式、节奏、氛围、对话和描写方式的段落编号。不要机械地选择开头、中段和结尾，要根据文体代表性判断。";
+  const prompt = `目标：选择总计约 ${length} 个中文字的代表性段落。只返回 JSON：{"selectedIds":["R0001","R0007"]}。编号按原文顺序排列，不要返回原文、解释或其他字段。\n\n【候选原文段落】\n${candidates.map((candidate) => `[${candidate.id}]（${candidate.text.replace(/\s/g, "").length} 字）\n${candidate.text}`).join("\n\n")}`;
+  const response = (await generateText(settings, system, prompt)).trim();
+  return selectReferenceCandidates(response, candidates, length);
 }
