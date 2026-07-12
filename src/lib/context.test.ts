@@ -43,4 +43,22 @@ describe("buildStoryContext", () => {
     expect(buildStoryContext(workspace, "c2")).not.toContain("废弃设定");
   });
 
+  it("写章节时只携带当前卷的章节大纲，其他卷只携带卷摘要", () => {
+    const volumeWorkspace: Workspace = {
+      ...workspace,
+      outline: [
+        { id: "v1", projectId: "p", parentId: null, type: "volume", title: "第一卷", summary: "第一卷摘要", position: 0, status: "planned", revision: 1 },
+        { ...workspace.outline[0], parentId: "v1" },
+        workspace.outline[1],
+        { id: "v2", projectId: "p", parentId: null, type: "volume", title: "第二卷", summary: "第二卷摘要", position: 1, status: "planned", revision: 1 },
+        { id: "future", projectId: "p", parentId: "v2", type: "chapter", title: "遥远章节", summary: "不应发送的详细剧情", position: 0, status: "planned", revision: 1 },
+      ],
+    };
+    const context = buildStoryContext(volumeWorkspace, "c2");
+    expect(context).toContain("当前卷完整大纲");
+    expect(context).toContain("第一卷摘要");
+    expect(context).toContain("第二卷摘要");
+    expect(context).not.toContain("不应发送的详细剧情");
+  });
+
 });

@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
         ? "作为连续性编辑，回答逻辑问题。必须区分已有证据、合理推断和资料缺口，并指出相关事件。"
         : `作为文字编辑改写《${targetChapter.title}》的指定文本。保持事实、人物动机和视角不变，只输出修改后的完整文本。`;
     const selected = body.selection?.trim() || targetChapter.content || "";
-    const prompt = `${targetBlock}\n\n${context}\n\n${targetBlock}\n\n待处理文本：\n---\n${selected}\n---\n\n用户要求：${body.instruction}`;
+    const prompt = `${targetBlock}\n\n${context}\n\n待处理文本：\n---\n${selected}\n---\n\n用户要求：${body.instruction}`;
     const result = await generateText(body.settings, task, prompt);
     const { returnedHeading, wrong } = hasWrongChapterHeading(result, targetChapter.title);
     if (body.action === "expand" && wrong) {
