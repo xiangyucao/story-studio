@@ -2,7 +2,7 @@ export type ImportedWorldEntry = {
   name: string;
   category: string;
   description: string;
-  isCanon: boolean | null;
+  isHardSetting: boolean | null;
 };
 
 export type WorldImportData = { worldEntries: ImportedWorldEntry[] };
@@ -13,13 +13,13 @@ export const worldImportExample: WorldImportData = {
       name: "翡翠城",
       category: "地点 / 表层世界",
       description: "秩序井然的近未来城市，实际上是覆盖在模拟系统上的视觉贴图。",
-      isCanon: true,
+      isHardSetting: true,
     },
     {
       name: "零号冷库",
       category: "地点 / 真实世界",
       description: "位于南极地下、保存人类意识服务器阵列的设施。",
-      isCanon: true,
+      isHardSetting: true,
     },
   ],
 };
@@ -45,13 +45,14 @@ export function normalizeWorldImportData(value: unknown): WorldImportData {
     const record = objectValue(value, `第 ${index + 1} 条世界观设定`);
     const name = optionalText(record, "name", `第 ${index + 1} 条设定的 name`);
     if (!name) throw new Error(`第 ${index + 1} 条设定的 name 不能为空`);
-    const isCanon = record.isCanon == null ? null : record.isCanon;
-    if (isCanon !== null && typeof isCanon !== "boolean") throw new Error(`设定“${name}”的 isCanon 必须是 true 或 false`);
+    const legacyIsCanon = record.isCanon;
+    const isHardSetting = record.isHardSetting == null ? (legacyIsCanon == null ? null : legacyIsCanon) : record.isHardSetting;
+    if (isHardSetting !== null && typeof isHardSetting !== "boolean") throw new Error(`设定“${name}”的 isHardSetting 必须是 true 或 false`);
     return {
       name,
       category: optionalText(record, "category", `设定“${name}”的 category`),
       description: optionalText(record, "description", `设定“${name}”的 description`),
-      isCanon,
+      isHardSetting,
     };
   });
   if (!worldEntries.length) throw new Error("JSON 中没有可导入的世界观设定");

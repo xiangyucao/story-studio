@@ -465,7 +465,7 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
               name: entry.name,
               category: entry.category || existing.category,
               description: entry.description || existing.description,
-              is_canon: entry.isCanon == null ? existing.is_canon : entry.isCanon ? 1 : 0,
+              is_canon: entry.isHardSetting == null ? existing.is_canon : entry.isHardSetting ? 1 : 0,
             };
             db.prepare("UPDATE world_entries SET name=?, category=?, description=?, is_canon=? WHERE id=?").run(
               merged.name, merged.category, merged.description, merged.is_canon, existing.id,
@@ -479,7 +479,7 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
               name: entry.name,
               category: entry.category || "背景",
               description: entry.description,
-              is_canon: entry.isCanon === false ? 0 : 1,
+              is_canon: entry.isHardSetting === false ? 0 : 1,
             };
             db.prepare("INSERT INTO world_entries VALUES (?, ?, ?, ?, ?, ?)").run(
               createdEntry.id, projectId, createdEntry.category, createdEntry.name, createdEntry.description, createdEntry.is_canon,
