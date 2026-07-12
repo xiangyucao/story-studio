@@ -1,3 +1,5 @@
+import { normalizeFoundationProposal } from "./foundation-proposal";
+
 export type ManualAiAction = "outline" | "outline-volume" | "outline-node" | "foundation" | "expand" | "revise" | "logic";
 
 export type ManualAiRequest = {
@@ -92,12 +94,7 @@ export function parseManualAiResponse(action: ManualAiAction, response: string, 
   };
   if (action === "foundation") return {
     type: "foundation",
-    proposal: {
-      rationale: text(value.rationale, "rationale"),
-      genre: text(value.genre, "genre"),
-      premise: text(value.premise, "premise"),
-      styleGuide: text(value.styleGuide, "styleGuide"),
-    },
+    proposal: normalizeFoundationProposal(value),
   };
   if (!Array.isArray(value.nodes)) throw new Error("nodes 必须是数组");
   const nodes = value.nodes.map((node, index) => {

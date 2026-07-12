@@ -168,6 +168,7 @@ button { cursor: pointer; }
 .foundation-ai-analysis strong, .foundation-ai-analysis small { display: block; }
 .foundation-ai-analysis small { margin-top: 3px; color: var(--muted); font-size: 10px; }
 .foundation-ai-analysis .proposal-card { grid-column: 1 / -1; }
+.foundation-ai-error { margin: -10px 0 22px; }
 .foundation-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
 .outline-tree, .detail-editor, .inline-ai-card, .logic-result { padding: 22px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
 .outline-tree-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 7px 14px; border-bottom: 1px solid #eee8df; }

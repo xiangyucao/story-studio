@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { zodTextFormat } from "openai/helpers/zod";
 import type { ModelSettings } from "./types";
+import { normalizeFoundationProposal } from "./foundation-proposal";
 
 function localServerRoot(baseUrl?: string) {
   const url = new URL(baseUrl || process.env.LOCAL_MODEL_BASE_URL || "http://127.0.0.1:11434/v1");
@@ -189,5 +190,5 @@ export async function generateFoundationFromReference(settings: ModelSettings, c
   const raw = await generateText(settings, `${system} 必须只返回 JSON，格式为 {"rationale":"分析说明","genre":"类型","premise":"新的核心构想方向","styleGuide":"具体写作规则与风格指南"}`, input);
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("本地模型没有返回 JSON 作品基石提案");
-  return foundationProposalSchema.parse(JSON.parse(match[0]));
+  return foundationProposalSchema.parse(normalizeFoundationProposal(JSON.parse(match[0])));
 }
