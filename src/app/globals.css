@@ -193,10 +193,14 @@ button { cursor: pointer; }
 .subsection-title { margin: 40px 0 16px; font-family: Georgia, "Noto Serif SC", serif; font-size: 22px; }
 .subsection-heading { display: flex; align-items: center; justify-content: space-between; }
 .relationship-list { display: grid; gap: 8px; }
-.relationship-row { display: grid; grid-template-columns: 110px 160px 110px 1fr; align-items: center; gap: 10px; padding: 13px 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 9px; font-size: 12px; }
+.relationship-editor-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 22px; align-items: start; }
+.relationship-row { width: 100%; display: grid; grid-template-columns: 110px 160px 110px 1fr; align-items: center; gap: 10px; padding: 13px 18px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 9px; font-size: 12px; text-align: left; }
+.relationship-row:hover, .relationship-row.selected { border-color: #d9aaa0; box-shadow: 0 8px 24px #5f403014; }
 .relationship-row > span { display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--accent); font-size: 10px; }
 .relationship-row i { width: 26px; height: 1px; background: #cbbfb2; }
 .relationship-row p { margin: 0; color: var(--muted); font-size: 10px; }
+.relationship-editor { position: sticky; top: 92px; }
+.empty-inline { padding: 18px; color: var(--muted); background: var(--paper); border: 1px dashed var(--line); border-radius: 9px; font-size: 11px; text-align: center; }
 .import-summary { display: flex; gap: 10px; margin: 14px 0; }
 .import-summary span { flex: 1; padding: 12px; color: var(--muted); background: #f6f2ec; border-radius: 8px; font-size: 11px; text-align: center; }
 .import-summary strong { display: block; margin-bottom: 2px; color: var(--ink); font-family: Georgia, "Noto Serif SC", serif; font-size: 20px; }
@@ -314,7 +318,7 @@ button { cursor: pointer; }
   .editor-card { margin: 10px; }
   .manuscript-editor { min-height: 55vh; padding: 25px; }
   .content-page { padding: 28px 16px 60px; }
-  .outline-grid, .character-layout, .world-layout { grid-template-columns: 1fr; }
+  .outline-grid, .character-layout, .world-layout, .relationship-editor-layout { grid-template-columns: 1fr; }
   .timeline-layout { grid-template-columns: 1fr; }
   .character-grid, .world-grid { grid-template-columns: 1fr; }
   .relationship-row { grid-template-columns: 1fr 1fr; }

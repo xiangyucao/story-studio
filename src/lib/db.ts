@@ -468,6 +468,21 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
       db.prepare("INSERT INTO relationships VALUES (?, ?, ?, ?, ?, ?)").run(relationId, payload.projectId, payload.sourceCharacterId, payload.targetCharacterId, payload.type || "关系", payload.description || "");
       return relationId;
     }
+    case "save-relationship": {
+      if (payload.sourceCharacterId === payload.targetCharacterId) throw new Error("一条关系需要两个不同的人物");
+      const characterCount = (db.prepare("SELECT COUNT(*) AS count FROM characters WHERE project_id=? AND id IN (?, ?)").get(
+        payload.projectId, payload.sourceCharacterId, payload.targetCharacterId,
+      ) as { count: number }).count;
+      if (characterCount !== 2) throw new Error("关系中的人物不存在或不属于当前作品");
+      const result = db.prepare("UPDATE relationships SET source_character_id=?, target_character_id=?, type=?, description=? WHERE id=? AND project_id=?").run(
+        payload.sourceCharacterId, payload.targetCharacterId, payload.type || "关系", payload.description || "", payload.id, payload.projectId,
+      );
+      if (!result.changes) throw new Error("没有找到要修改的人物关系");
+      return payload.id;
+    }
+    case "delete-relationship":
+      db.prepare("DELETE FROM relationships WHERE id=?").run(payload.id);
+      return payload.id;
     case "create-outline-node": {
       const projectId = String(payload.projectId);
       const nodeType = String(payload.type) as OutlineNode["type"];

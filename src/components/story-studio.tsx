@@ -8,7 +8,7 @@ import {
   Upload,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Chapter, Character, ModelSettings, Project, StoryEvent, Workspace, WorldEntry } from "@/lib/types";
+import type { Chapter, Character, ModelSettings, Project, Relationship, StoryEvent, Workspace, WorldEntry } from "@/lib/types";
 import { normalizeCharacterName, parseCharacterImportJson, type CharacterImportData } from "@/lib/character-import";
 
 type Tab = "write" | "outline" | "characters" | "world" | "logic" | "history";
@@ -55,11 +55,13 @@ export function StoryStudio() {
   const [activeTab, setActiveTab] = useState<Tab>("outline");
   const [selectedChapterId, setSelectedChapterId] = useState("");
   const [selectedCharacterId, setSelectedCharacterId] = useState("");
+  const [selectedRelationshipId, setSelectedRelationshipId] = useState("");
   const [selectedOutlineId, setSelectedOutlineId] = useState("");
   const [selectedWorldId, setSelectedWorldId] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [chapterDraft, setChapterDraft] = useState<Chapter | null>(null);
   const [characterDraft, setCharacterDraft] = useState<Character | null>(null);
+  const [relationshipEditDraft, setRelationshipEditDraft] = useState<Relationship | null>(null);
   const [outlineDraft, setOutlineDraft] = useState<Workspace["outline"][number] | null>(null);
   const [worldDraft, setWorldDraft] = useState<WorldEntry | null>(null);
   const [eventDraft, setEventDraft] = useState<StoryEvent | null>(null);
@@ -104,6 +106,7 @@ export function StoryStudio() {
       setProjectDraft({ ...data.project });
       const chapter = data.chapters.find((item) => item.id === selectedChapterId) ?? data.chapters[0] ?? null;
       const character = data.characters.find((item) => item.id === selectedCharacterId) ?? data.characters[0] ?? null;
+      const relationship = data.relationships.find((item) => item.id === selectedRelationshipId) ?? data.relationships[0] ?? null;
       const outlineNode = data.outline.find((item) => item.id === (preferredOutlineId || selectedOutlineId)) ?? data.outline[0] ?? null;
       const worldEntry = data.worldEntries.find((item) => item.id === selectedWorldId) ?? data.worldEntries[0] ?? null;
       const storyEvent = data.events.find((item) => item.id === selectedEventId) ?? data.events[0] ?? null;
@@ -111,6 +114,8 @@ export function StoryStudio() {
       setChapterDraft(chapter);
       setSelectedCharacterId(character?.id || "");
       setCharacterDraft(character);
+      setSelectedRelationshipId(relationship?.id || "");
+      setRelationshipEditDraft(relationship ? { ...relationship } : null);
       setSelectedOutlineId(outlineNode?.id || "");
       setOutlineDraft(outlineNode ? { ...outlineNode } : null);
       setSelectedWorldId(worldEntry?.id || "");
@@ -122,7 +127,7 @@ export function StoryStudio() {
     } finally {
       setBusy(false);
     }
-  }, [selectedChapterId, selectedCharacterId, selectedOutlineId, selectedWorldId, selectedEventId]);
+  }, [selectedChapterId, selectedCharacterId, selectedRelationshipId, selectedOutlineId, selectedWorldId, selectedEventId]);
 
   useEffect(() => {
     // 首次挂载后从本地 API 载入持久化工作区。
@@ -336,6 +341,15 @@ export function StoryStudio() {
     setRelationshipDraft({ sourceCharacterId: source.id, targetCharacterId: target.id, type: "盟友", description: "" });
   };
 
+  const saveCharacter = async () => {
+    if (!characterDraft?.name.trim()) {
+      setMessage("人物姓名不能为空");
+      return;
+    }
+    const result = await mutate("save-character", characterDraft as unknown as Record<string, unknown>);
+    if (result) setMessage(`人物“${characterDraft.name}”已保存，后续 AI 请求会使用最新资料`);
+  };
+
   const createRelationship = async () => {
     if (!workspace || !relationshipDraft) return;
     if (relationshipDraft.sourceCharacterId === relationshipDraft.targetCharacterId) {
@@ -347,6 +361,20 @@ export function StoryStudio() {
       setRelationshipDraft(null);
       setMessage("人物关系已添加，后续 AI 请求会使用这条关系");
     }
+  };
+
+  const saveRelationship = async () => {
+    if (!workspace || !relationshipEditDraft) return;
+    if (relationshipEditDraft.sourceCharacterId === relationshipEditDraft.targetCharacterId) {
+      setMessage("一条关系需要选择两个不同的人物");
+      return;
+    }
+    if (!relationshipEditDraft.type.trim()) {
+      setMessage("关系类型不能为空");
+      return;
+    }
+    const result = await mutate("save-relationship", { ...relationshipEditDraft, projectId: workspace.project.id });
+    if (result) setMessage("人物关系已保存，后续 AI 请求会使用最新关系");
   };
 
   const readCharacterImportFile = async (file?: File) => {
@@ -485,9 +513,9 @@ export function StoryStudio() {
           <ContentPage eyebrow="CAST" title="人物与关系" description="人物动机、秘密和说话方式是连续性检查的基础。" action={<div className="page-actions"><input ref={characterImportInputRef} className="visually-hidden" type="file" accept="application/json,.json" onChange={(event) => void readCharacterImportFile(event.target.files?.[0])} /><button className="secondary-button" onClick={() => characterImportInputRef.current?.click()}><Upload size={17} />导入 JSON</button><button className="primary-button" onClick={async () => { const name = window.prompt("人物姓名"); if (name) await mutate("create-character", { projectId: workspace.project.id, name }); }}><CirclePlus size={17} />添加人物</button></div>}>
             <div className="character-layout">
               <div className="character-grid">{workspace.characters.map((character) => <button key={character.id} className={character.id === selectedCharacterId ? "character-card selected" : "character-card"} onClick={() => { setSelectedCharacterId(character.id); setCharacterDraft({ ...character }); }}><div className="avatar">{character.name.slice(0, 1)}</div><div><h3>{character.name}</h3><span>{character.role || "待设定角色"}</span><p>{character.goal || character.description}</p></div></button>)}</div>
-              {characterDraft && <div className="detail-editor"><div className="section-heading"><div><span className="eyebrow">CHARACTER CARD</span><h2>{characterDraft.name}</h2></div><button className="primary-button small" onClick={() => void mutate("save-character", characterDraft as unknown as Record<string, unknown>)}><Save size={15} />保存</button></div><Field label="姓名" value={characterDraft.name} onChange={(name) => setCharacterDraft({ ...characterDraft, name })} /><Field label="角色" value={characterDraft.role} onChange={(role) => setCharacterDraft({ ...characterDraft, role })} /><Field label="描述" value={characterDraft.description} multiline onChange={(description) => setCharacterDraft({ ...characterDraft, description })} /><div className="two-columns"><Field label="目标" value={characterDraft.goal} onChange={(goal) => setCharacterDraft({ ...characterDraft, goal })} /><Field label="恐惧" value={characterDraft.fear} onChange={(fear) => setCharacterDraft({ ...characterDraft, fear })} /></div><Field label="秘密" value={characterDraft.secret} onChange={(secret) => setCharacterDraft({ ...characterDraft, secret })} /><Field label="说话风格" value={characterDraft.voice} multiline onChange={(voice) => setCharacterDraft({ ...characterDraft, voice })} /><button className="danger-button full-danger" onClick={async () => { const relationshipCount = workspace.relationships.filter((relationship) => relationship.sourceCharacterId === characterDraft.id || relationship.targetCharacterId === characterDraft.id).length; if (!window.confirm(`确认删除人物“${characterDraft.name}”？${relationshipCount ? `\n同时会删除与此人物有关的 ${relationshipCount} 条关系。` : ""}`)) return; const result = await mutate("delete-character", { id: characterDraft.id }); if (result) setMessage("人物及其相关关系已删除"); }}>删除这个人物</button></div>}
+              {characterDraft && <div className="detail-editor"><div className="section-heading"><div><span className="eyebrow">CHARACTER CARD</span><h2>{characterDraft.name}</h2></div><button className="primary-button small" disabled={busy || !characterDraft.name.trim()} onClick={() => void saveCharacter()}><Save size={15} />保存</button></div><Field label="姓名" value={characterDraft.name} onChange={(name) => setCharacterDraft({ ...characterDraft, name })} /><Field label="角色" value={characterDraft.role} onChange={(role) => setCharacterDraft({ ...characterDraft, role })} /><Field label="描述" value={characterDraft.description} multiline onChange={(description) => setCharacterDraft({ ...characterDraft, description })} /><div className="two-columns"><Field label="目标" value={characterDraft.goal} onChange={(goal) => setCharacterDraft({ ...characterDraft, goal })} /><Field label="恐惧" value={characterDraft.fear} onChange={(fear) => setCharacterDraft({ ...characterDraft, fear })} /></div><Field label="秘密" value={characterDraft.secret} onChange={(secret) => setCharacterDraft({ ...characterDraft, secret })} /><Field label="说话风格" value={characterDraft.voice} multiline onChange={(voice) => setCharacterDraft({ ...characterDraft, voice })} /><button className="danger-button full-danger" onClick={async () => { const relationshipCount = workspace.relationships.filter((relationship) => relationship.sourceCharacterId === characterDraft.id || relationship.targetCharacterId === characterDraft.id).length; if (!window.confirm(`确认删除人物“${characterDraft.name}”？${relationshipCount ? `\n同时会删除与此人物有关的 ${relationshipCount} 条关系。` : ""}`)) return; const result = await mutate("delete-character", { id: characterDraft.id }); if (result) setMessage("人物及其相关关系已删除"); }}>删除这个人物</button></div>}
             </div>
-            <div className="subsection-heading"><h2 className="subsection-title">关系网络</h2><button className="secondary-button small" onClick={openRelationshipEditor}><CirclePlus size={16} />添加关系</button></div><div className="relationship-list">{workspace.relationships.map((r) => <div key={r.id} className="relationship-row"><strong>{r.sourceName}</strong><span><i />{r.type}<i /></span><strong>{r.targetName}</strong><p>{r.description}</p></div>)}</div>
+            <div className="subsection-heading"><h2 className="subsection-title">关系网络</h2><button className="secondary-button small" onClick={openRelationshipEditor}><CirclePlus size={16} />添加关系</button></div><div className="relationship-editor-layout"><div className="relationship-list">{workspace.relationships.length ? workspace.relationships.map((relationship) => <button key={relationship.id} className={relationship.id === selectedRelationshipId ? "relationship-row selected" : "relationship-row"} onClick={() => { setSelectedRelationshipId(relationship.id); setRelationshipEditDraft({ ...relationship }); }}><strong>{relationship.sourceName}</strong><span><i />{relationship.type}<i /></span><strong>{relationship.targetName}</strong><p>{relationship.description}</p></button>) : <div className="empty-inline">还没有人物关系，点击“添加关系”开始建立。</div>}</div>{relationshipEditDraft && <div className="detail-editor relationship-editor"><div className="section-heading"><div><span className="eyebrow">RELATIONSHIP</span><h2>修改关系</h2></div><button className="primary-button small" disabled={busy || !relationshipEditDraft.type.trim() || relationshipEditDraft.sourceCharacterId === relationshipEditDraft.targetCharacterId} onClick={() => void saveRelationship()}><Save size={15} />保存</button></div><div className="two-columns"><Field label="起点人物" value={relationshipEditDraft.sourceCharacterId} options={workspace.characters.map((character) => ({ label: character.name, value: character.id }))} onChange={(sourceCharacterId) => setRelationshipEditDraft({ ...relationshipEditDraft, sourceCharacterId, sourceName: workspace.characters.find((character) => character.id === sourceCharacterId)?.name || "" })} /><Field label="目标人物" value={relationshipEditDraft.targetCharacterId} options={workspace.characters.map((character) => ({ label: character.name, value: character.id }))} onChange={(targetCharacterId) => setRelationshipEditDraft({ ...relationshipEditDraft, targetCharacterId, targetName: workspace.characters.find((character) => character.id === targetCharacterId)?.name || "" })} /></div><Field label="关系类型" value={relationshipEditDraft.type} onChange={(type) => setRelationshipEditDraft({ ...relationshipEditDraft, type })} /><Field label="关系说明" value={relationshipEditDraft.description} multiline onChange={(description) => setRelationshipEditDraft({ ...relationshipEditDraft, description })} /><button className="danger-button full-danger" onClick={async () => { if (!window.confirm(`确认删除“${relationshipEditDraft.sourceName} → ${relationshipEditDraft.targetName}”这条关系？`)) return; const result = await mutate("delete-relationship", { id: relationshipEditDraft.id }); if (result) setMessage("人物关系已删除"); }}>删除这条关系</button></div>}</div>
           </ContentPage>
         )}
 
