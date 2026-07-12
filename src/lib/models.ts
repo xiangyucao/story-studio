@@ -15,16 +15,17 @@ function localServerRoot(baseUrl?: string) {
 }
 
 export async function clearLocalModelContext(settings: ModelSettings) {
-  if (settings.provider !== "openai-compatible") return { supported: false, clearedSlots: 0, erasedTokens: 0 };
+  if (settings.provider !== "openai-compatible") return { supported: false, clearedSlots: 0, erasedTokens: 0, error: "not-local-model" };
   const root = localServerRoot(settings.baseUrl);
   try {
     const slotsResponse = await fetch(`${root}/slots`, { signal: AbortSignal.timeout(3000), cache: "no-store" });
-    if (!slotsResponse.ok) return { supported: false, clearedSlots: 0, erasedTokens: 0 };
+    if (!slotsResponse.ok) return { supported: false, clearedSlots: 0, erasedTokens: 0, error: `slots-http-${slotsResponse.status}` };
     const raw = await slotsResponse.json() as unknown;
     const slots = (Array.isArray(raw) ? raw : [raw]) as Array<{ id?: number; is_processing?: boolean; n_prompt_tokens?: number }>;
     const idle = slots.filter((slot) => Number.isInteger(slot.id) && !slot.is_processing && Number(slot.n_prompt_tokens || 0) > 0);
     let clearedSlots = 0;
     let erasedTokens = 0;
+    let error = "";
     for (const slot of idle) {
       const response = await fetch(`${root}/slots/${slot.id}?action=erase`, {
         method: "POST",
@@ -32,14 +33,18 @@ export async function clearLocalModelContext(settings: ModelSettings) {
         body: "{}",
         signal: AbortSignal.timeout(5000),
       });
-      if (!response.ok) continue;
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        error = `erase-http-${response.status}${detail ? `: ${detail.slice(0, 240)}` : ""}`;
+        continue;
+      }
       const result = await response.json() as { n_erased?: number };
       clearedSlots += 1;
       erasedTokens += Number(result.n_erased || slot.n_prompt_tokens || 0);
     }
-    return { supported: idle.length === 0 || clearedSlots > 0, clearedSlots, erasedTokens };
-  } catch {
-    return { supported: false, clearedSlots: 0, erasedTokens: 0 };
+    return { supported: idle.length === 0 || clearedSlots > 0, clearedSlots, erasedTokens, error: error || undefined };
+  } catch (cause) {
+    return { supported: false, clearedSlots: 0, erasedTokens: 0, error: cause instanceof Error ? cause.message : "context-clear-failed" };
   }
 }
 
