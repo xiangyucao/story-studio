@@ -18,6 +18,7 @@ import type {
 import { normalizeCharacterImportData, normalizeCharacterName } from "./character-import";
 import { normalizeWorldEntryName, normalizeWorldImportData } from "./world-import";
 import { normalizeTimelineEventTitle, normalizeTimelineImportData } from "./timeline-import";
+import { parseOutlineJson, type OutlineJsonNode } from "./outline-json";
 
 const dataDir = process.env.STORY_STUDIO_DATA_DIR
   ? path.resolve(process.env.STORY_STUDIO_DATA_DIR)
@@ -388,6 +389,54 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
   switch (action) {
     case "clone-project":
       return cloneProjectForRewrite(String(payload.id || ""), String(payload.title || ""));
+    case "import-outline-json": {
+      const projectId = String(payload.projectId || "");
+      const imported = parseOutlineJson(typeof payload.data === "string" ? payload.data : JSON.stringify(payload.data));
+      const clearChangedContent = Boolean(payload.clearChangedContent);
+      const existingIds = new Set((db.prepare("SELECT id FROM outline_nodes WHERE project_id=?").all(projectId) as Array<{ id: string }>).map((row) => row.id));
+      let position = 0;
+      let created = 0;
+      let updated = 0;
+      let changedChapters = 0;
+      let clearedChapters = 0;
+      const importNodes = (nodes: OutlineJsonNode[], parentId: string | null) => nodes.forEach((node) => {
+        const matchedById = node.id && existingIds.has(node.id)
+          ? db.prepare("SELECT * FROM outline_nodes WHERE id=? AND project_id=?").get(node.id, projectId) as Row | undefined
+          : undefined;
+        const existing = matchedById || db.prepare("SELECT * FROM outline_nodes WHERE project_id=? AND parent_id IS ? AND type=? AND title=? LIMIT 1").get(projectId, parentId, node.type, node.title) as Row | undefined;
+        let nodeId: string;
+        if (existing) {
+          nodeId = String(existing.id);
+          const changed = String(existing.title) !== node.title || String(existing.summary) !== node.summary;
+          const revision = Number(existing.revision) + (changed ? 1 : 0);
+          db.prepare("UPDATE outline_nodes SET parent_id=?, type=?, title=?, summary=?, position=?, status=?, revision=? WHERE id=?").run(parentId, node.type, node.title, node.summary, position++, node.status, revision, nodeId);
+          updated += 1;
+          if (node.type === "chapter") {
+            const linked = db.prepare("SELECT id, content FROM chapters WHERE outline_node_id=?").get(nodeId) as { id: string; content: string } | undefined;
+            if (linked) {
+              if (changed && linked.content.trim()) changedChapters += 1;
+              const clear = changed && clearChangedContent && Boolean(linked.content.trim());
+              db.prepare("UPDATE chapters SET title=?, summary=?, content=CASE WHEN ? THEN '' ELSE content END, word_count=CASE WHEN ? THEN 0 ELSE word_count END, outline_stale=CASE WHEN ? THEN 0 WHEN ? THEN 1 ELSE outline_stale END, based_on_outline_revision=CASE WHEN ? THEN ? ELSE based_on_outline_revision END, updated_at=? WHERE id=?").run(
+                node.title, node.summary, clear ? 1 : 0, clear ? 1 : 0, clear ? 1 : 0, changed ? 1 : 0, clear ? 1 : 0, revision, timestamp, linked.id,
+              );
+              if (clear) clearedChapters += 1;
+            }
+          }
+        } else {
+          nodeId = id();
+          db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)").run(nodeId, projectId, parentId, node.type, node.title, node.summary, position++, node.status);
+          existingIds.add(nodeId);
+          created += 1;
+          if (node.type === "chapter") {
+            const chapterPosition = (db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM chapters WHERE project_id=?").get(projectId) as { p: number }).p + 1;
+            db.prepare("INSERT INTO chapters (id, project_id, outline_node_id, title, content, summary, status, position, word_count, target_word_count, outline_stale, based_on_outline_revision, updated_at) VALUES (?, ?, ?, ?, '', ?, 'draft', ?, 0, 3000, 0, 1, ?)").run(id(), projectId, nodeId, node.title, node.summary, chapterPosition, timestamp);
+          }
+        }
+        importNodes(node.children, nodeId);
+      });
+      db.transaction(() => importNodes(imported.outline, null))();
+      return JSON.stringify({ created, updated, changedChapters, clearedChapters });
+    }
     case "save-project":
       db.prepare("UPDATE projects SET title=?, genre=?, premise=?, style_guide=?, reference_title=?, reference_text=?, updated_at=? WHERE id=?").run(payload.title, payload.genre, payload.premise, payload.styleGuide, payload.referenceTitle ?? "", payload.referenceText ?? "", timestamp, payload.id);
       return payload.id;

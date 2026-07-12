@@ -13,6 +13,7 @@ import { characterImportExample, normalizeCharacterName, parseCharacterImportJso
 import { normalizeWorldEntryName, parseWorldImportJson, worldImportExample, type WorldImportData } from "@/lib/world-import";
 import { normalizeTimelineEventTitle, parseTimelineImportJson, timelineImportExample, type TimelineImportData } from "@/lib/timeline-import";
 import { parseManualAiResponse, type ManualAiAction } from "@/lib/manual-ai";
+import { exportOutlineJson, findChangedWrittenChapters, outlineJsonExample, parseOutlineJson, type OutlineJsonData } from "@/lib/outline-json";
 
 type Tab = "write" | "outline" | "characters" | "world" | "logic" | "history";
 type AiAction = "outline" | "outline-volume" | "outline-node" | "compact-reference" | "expand" | "revise" | "logic";
@@ -21,7 +22,8 @@ type RelationshipDraft = { sourceCharacterId: string; targetCharacterId: string;
 type CharacterImportPreview = { fileName: string; data: CharacterImportData; missingNames: string[] };
 type WorldImportPreview = { fileName: string; data: WorldImportData };
 type TimelineImportPreview = { fileName: string; data: TimelineImportData };
-type JsonExampleKind = "characters" | "world" | "timeline";
+type OutlineImportPreview = { fileName: string; data: OutlineJsonData; changedWrittenChapterTitles: string[]; clearChangedContent: boolean };
+type JsonExampleKind = "outline" | "characters" | "world" | "timeline";
 type LogicSource = { kind: "chapter" | "outline" | "character" | "relationship" | "world" | "event"; id: string; label: string; excerpt: string };
 type LogicResponse = { mode: "quick" | "ai"; answer: string; queries?: string[]; sources?: LogicSource[]; requestId?: string };
 type AiProposal = { type: "text"; result: string; targetChapterId?: string; requestId?: string } | {
@@ -59,12 +61,14 @@ const defaultSettings: ModelSettings = {
 };
 
 const jsonImportExamples: Record<JsonExampleKind, unknown> = {
+  outline: outlineJsonExample,
   characters: characterImportExample,
   world: worldImportExample,
   timeline: timelineImportExample,
 };
 
 const jsonExampleTitles: Record<JsonExampleKind, string> = {
+  outline: "故事大纲 JSON 示例",
   characters: "人物与关系 JSON 示例",
   world: "世界观与背景 JSON 示例",
   timeline: "事件时间线 JSON 示例",
@@ -114,10 +118,12 @@ export function StoryStudio() {
   const [characterImportPreview, setCharacterImportPreview] = useState<CharacterImportPreview | null>(null);
   const [worldImportPreview, setWorldImportPreview] = useState<WorldImportPreview | null>(null);
   const [timelineImportPreview, setTimelineImportPreview] = useState<TimelineImportPreview | null>(null);
+  const [outlineImportPreview, setOutlineImportPreview] = useState<OutlineImportPreview | null>(null);
   const [jsonExampleKind, setJsonExampleKind] = useState<JsonExampleKind | null>(null);
   const characterImportInputRef = useRef<HTMLInputElement>(null);
   const worldImportInputRef = useRef<HTMLInputElement>(null);
   const timelineImportInputRef = useRef<HTMLInputElement>(null);
+  const outlineImportInputRef = useRef<HTMLInputElement>(null);
   const referenceImportInputRef = useRef<HTMLInputElement>(null);
   const [settings, setSettings] = useState<ModelSettings>(() => {
     if (typeof window === "undefined") return defaultSettings;
@@ -672,6 +678,41 @@ export function StoryStudio() {
     }
   };
 
+  const exportOutlineToJson = () => {
+    if (!workspace) return;
+    const blob = new Blob([JSON.stringify(exportOutlineJson(workspace), null, 2)], { type: "application/json;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${workspace.project.title.replace(/[\\/:*?"<>|]/g, "_")}-故事大纲.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    setMessage("故事大纲 JSON 已导出");
+  };
+
+  const readOutlineImportFile = async (file?: File) => {
+    if (!workspace || !file) return;
+    try {
+      const data = parseOutlineJson(await file.text());
+      const changedWrittenChapterTitles = findChangedWrittenChapters(workspace, data).map((chapter) => chapter.title);
+      setOutlineImportPreview({ fileName: file.name, data, changedWrittenChapterTitles, clearChangedContent: false });
+      setMessage("");
+    } catch (error) {
+      setOutlineImportPreview(null);
+      setMessage(error instanceof Error ? `大纲 JSON 导入失败：${error.message}` : "大纲 JSON 导入失败");
+    } finally {
+      if (outlineImportInputRef.current) outlineImportInputRef.current.value = "";
+    }
+  };
+
+  const importOutlineFromJson = async () => {
+    if (!workspace || !outlineImportPreview) return;
+    const result = await mutate("import-outline-json", { projectId: workspace.project.id, data: outlineImportPreview.data, clearChangedContent: outlineImportPreview.clearChangedContent });
+    if (!result) return;
+    const stats = JSON.parse(result) as { created: number; updated: number; changedChapters: number; clearedChapters: number };
+    setOutlineImportPreview(null);
+    setMessage(`大纲导入完成：新增 ${stats.created} 个节点，更新 ${stats.updated} 个节点；${stats.clearedChapters ? `已清空 ${stats.clearedChapters} 章正文` : stats.changedChapters ? `${stats.changedChapters} 章正文已标记为待同步` : "没有已写正文受到影响"}`);
+  };
+
   const importReferenceWork = async (file?: File) => {
     if (!file || !projectDraft) return;
     try {
@@ -791,6 +832,8 @@ export function StoryStudio() {
         )}
 
         {activeTab === "outline" && (
+          <>
+          <div className="outline-json-toolbar page-actions"><input ref={outlineImportInputRef} className="visually-hidden" type="file" accept="application/json,.json" onChange={(event) => void readOutlineImportFile(event.target.files?.[0])} /><button className="text-button example-button" onClick={() => setJsonExampleKind("outline")}><FileText size={15} />JSON 示例</button><button className="secondary-button" onClick={exportOutlineToJson}><Download size={16} />导出大纲</button><button className="secondary-button" onClick={() => outlineImportInputRef.current?.click()}><Upload size={16} />导入大纲</button></div>
           <ContentPage eyebrow="STRUCTURE" title="故事大纲" description="先确定卷、章和场景，再进入写作扩展；每个节点都可以独立修改。" action={<div className="page-actions"><button className="secondary-button" onClick={() => referenceImportInputRef.current?.click()}><Upload size={16} />上传参考作品</button><button className="primary-button" onClick={() => { setAiAction("outline"); setOutlineVolumeCount(7); setAiInstruction(projectDraft?.referenceText ? "请综合当前作品资料和参考范本创作新的整体大纲。已有的类型、核心构想和写作规则优先遵守；未填写的部分请从范本中推断。只借鉴结构与风格，不复制范本剧情。" : "请根据当前作品基石创作完整的卷级大纲，确保各卷连续推进并完成结局。"); setProposal(null); setAiError(""); setOverallOutlineOpen(true); }}><Sparkles size={17} />用 AI 构思整体大纲</button></div>}>
             {projectDraft && <div className="project-foundation"><div className="section-heading"><div><span className="eyebrow">STORY FOUNDATION</span><h2>作品基石</h2></div><button className="primary-button small" onClick={() => void mutate("save-project", projectDraft as unknown as Record<string, unknown>)}><Save size={15} />保存</button></div><div className="foundation-grid"><Field label="作品名" value={projectDraft.title} onChange={(title) => setProjectDraft({ ...projectDraft, title })} /><Field label="类型" value={projectDraft.genre} onChange={(genre) => setProjectDraft({ ...projectDraft, genre })} /></div><Field label="核心构想" value={projectDraft.premise} multiline onChange={(premise) => setProjectDraft({ ...projectDraft, premise })} /><Field label="写作规则 / 风格指南" value={projectDraft.styleGuide} multiline onChange={(styleGuide) => setProjectDraft({ ...projectDraft, styleGuide })} /><div className="reference-sample"><div className="reference-sample-head"><div><span className="eyebrow">STYLE REFERENCE</span><strong>参考范本 / 参考片段</strong><small>AI 只学习叙事视角、句式、节奏和氛围，不继承范本的人物与剧情。</small></div><input ref={referenceImportInputRef} className="visually-hidden" type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => void importReferenceWork(event.target.files?.[0])} /><button className="secondary-button small" onClick={() => referenceImportInputRef.current?.click()}><Upload size={15} />{projectDraft.referenceText ? "更换作品" : "上传作品"}</button></div>{projectDraft.referenceTitle && <div className="reference-file"><FileText size={15} /><span>{projectDraft.referenceTitle} · {projectDraft.referenceText.length.toLocaleString()} 字符</span><button className="text-button" onClick={() => setProjectDraft({ ...projectDraft, referenceTitle: "", referenceText: "" })}>清空</button></div>}<Field label="范本内容" value={projectDraft.referenceText} multiline onChange={(referenceText) => setProjectDraft({ ...projectDraft, referenceText })} /></div></div>}
             {projectDraft?.referenceText && <div className="reference-compact"><div className="reference-compact-head"><div><span className="eyebrow">AI REFERENCE EXTRACTION</span><strong>精简范本</strong><small>AI 阅读完整范本后挑选最具代表性的原文段落，并直接替换上方“范本内容”。不会机械地固定抽取开头、中段和结尾。</small></div><label><span>目标字数</span><input type="number" min={1000} max={50000} step={1000} value={referenceSampleLength} onChange={(event) => setReferenceSampleLength(Math.max(1000, Math.min(50000, Number(event.target.value) || 10000)))} /></label><button className="secondary-button" disabled={busy} onClick={() => void compactReferenceWork()}>{busy && aiAction === "compact-reference" ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}{busy && aiAction === "compact-reference" ? "AI 正在提取…" : "精简范本"}</button></div>{aiAction === "compact-reference" && aiError && <div className="ai-error"><AlertTriangle size={16} /><span>精简失败：{aiError}</span></div>}</div>}
@@ -802,6 +845,8 @@ export function StoryStudio() {
               <div className="outline-side">{outlineDraft && <><div className="detail-editor outline-editor"><div className="section-heading"><div><span className="eyebrow">SELECTED NODE</span><h2>{isVolumeLikeNode(outlineDraft) ? "卷" : outlineDraft.type === "chapter" ? "章" : "场景"}节点</h2></div><button className="primary-button small" onClick={async () => { await mutate("save-outline-node", outlineDraft as unknown as Record<string, unknown>); setMessage("大纲节点已保存；关联正文已按需标记"); }}><Save size={15} />保存</button></div><Field label="标题" value={outlineDraft.title} onChange={(title) => setOutlineDraft({ ...outlineDraft, title })} /><Field label="剧情摘要 / 本节点要完成的任务" value={outlineDraft.summary} multiline onChange={(summary) => setOutlineDraft({ ...outlineDraft, summary })} /><Field label="状态" value={outlineDraft.status} options={[{ label: "计划中", value: "planned" }, { label: "已起草", value: "drafted" }, { label: "已完成", value: "complete" }]} onChange={(status) => setOutlineDraft({ ...outlineDraft, status })} />{outlineDraft.type === "chapter" && !isVolumeLikeNode(outlineDraft) && (() => { const linked = workspace.chapters.find((chapter) => chapter.outlineNodeId === outlineDraft.id); return linked ? <button className="secondary-button full-action" onClick={() => selectChapter(linked)}><FileText size={15} />进入本章写作{linked.outlineStale ? "（待同步）" : ""}</button> : null; })()}<div className="outline-structure-actions">{isVolumeLikeNode(outlineDraft) && <button className="ai-structure-action" onClick={() => { setAiAction("outline-volume"); setVolumeChapterCount(7); setAiInstruction(`根据以下本卷介绍展开章节：\n${outlineDraft.summary.trim() || outlineDraft.title}\n\n要求：每一章都要提供明确的章节标题和章节介绍，形成连续推进的剧情，不要重复其他卷。`); setProposal(null); setAiError(""); setOverallOutlineOpen(true); }}><Sparkles size={14} />AI 展开为章节</button>}{outlineDraft.type === "volume" && <><button onClick={() => setNodeCreateDraft({ type: "chapter", parentId: outlineDraft.id, afterId: outlineDraft.id, title: "新章", summary: "", heading: `在《${outlineDraft.title}》中添加章节` })}><CirclePlus size={14} />本卷添加章</button><button onClick={() => setNodeCreateDraft({ type: "volume", parentId: null, afterId: outlineDraft.id, title: "新卷", summary: "", heading: `在《${outlineDraft.title}》后插入新卷` })}><CirclePlus size={14} />后插新卷</button></>}{outlineDraft.type === "chapter" && !isVolumeLikeNode(outlineDraft) && <><button onClick={() => setNodeCreateDraft({ type: "scene", parentId: outlineDraft.id, afterId: outlineDraft.id, title: "新场景", summary: "", heading: `在《${outlineDraft.title}》中添加场景` })}><CirclePlus size={14} />本章添加场景</button><button onClick={() => setNodeCreateDraft({ type: "chapter", parentId: outlineDraft.parentId, afterId: outlineDraft.id, title: "新章", summary: "", heading: `在《${outlineDraft.title}》后插入新章` })}><CirclePlus size={14} />后插新章</button></>}{outlineDraft.type === "scene" && <button onClick={() => setNodeCreateDraft({ type: "scene", parentId: outlineDraft.parentId, afterId: outlineDraft.id, title: "新场景", summary: "", heading: `在《${outlineDraft.title}》后插入场景` })}><CirclePlus size={14} />后插场景</button>}<button className="danger-text-button" onClick={() => setDeleteOutlineOpen(true)}>删除此{isVolumeLikeNode(outlineDraft) ? "卷" : outlineDraft.type === "chapter" ? "章" : "场景"}</button></div></div><div className="inline-ai-card node-ai-card"><Sparkles size={20} /><h3>AI 单独修改这个节点</h3><p>只修改当前节点，不会改动其他卷、章或场景。</p><textarea value={outlineAiInstruction} onChange={(e) => setOutlineAiInstruction(e.target.value)} placeholder="例如：保留结局不变，但让本章中点出现一次更强的错误判断……" /><button className="primary-button full" onClick={() => void callAi("outline-node")} disabled={busy || !outlineAiInstruction.trim()}>生成节点修改提案</button>{proposal?.type === "outline-node" && <ProposalCard proposal={proposal} onApply={() => void applyProposal()} onClose={() => setProposal(null)} />}</div></>}</div>
             </div>
           </ContentPage>
+          {outlineImportPreview && <div className="modal-backdrop" onMouseDown={() => setOutlineImportPreview(null)}><section className="settings-modal wide-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">OUTLINE JSON IMPORT</span><h2>导入故事大纲</h2></div><button className="icon-button" aria-label="关闭大纲导入预览" onClick={() => setOutlineImportPreview(null)}><X size={19} /></button></div><p className="modal-help">文件：{outlineImportPreview.fileName}。按导出文件中的节点 ID 更新；没有 ID 时按同一层级的同名节点匹配。新增或更新节点，不删除 JSON 中未出现的现有大纲。</p><div className="import-summary"><span><strong>{outlineImportPreview.data.outline.length}</strong> 个顶层节点</span><span><strong>{outlineImportPreview.changedWrittenChapterTitles.length}</strong> 个已写章节的大纲发生变化</span></div>{outlineImportPreview.changedWrittenChapterTitles.length > 0 && <><div className="import-preview-list">{outlineImportPreview.changedWrittenChapterTitles.map((title) => <div className="import-preview-row" key={title}><span className="import-status update">变更</span><div><strong>{title}</strong><small>导入后需要按照新大纲同步正文</small></div></div>)}</div><label className="world-editor-note"><input type="checkbox" checked={outlineImportPreview.clearChangedContent} onChange={(event) => setOutlineImportPreview({ ...outlineImportPreview, clearChangedContent: event.target.checked })} /> 清空这些发生大纲变化的章节正文（不勾选则保留正文并标记为“待同步”）</label></>}<div className="modal-button-row"><button className="secondary-button" onClick={() => setOutlineImportPreview(null)}>取消</button><button className="primary-button" disabled={busy} onClick={() => void importOutlineFromJson()}>{busy ? <LoaderCircle className="spin" size={17} /> : <Upload size={17} />}确认导入</button></div></section></div>}
+          </>
         )}
 
         {activeTab === "characters" && (

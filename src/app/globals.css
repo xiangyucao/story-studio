@@ -51,6 +51,7 @@ button { cursor: pointer; }
 .panel-subtle { background: #f0ece5; border-right: 1px solid var(--line); }
 .chapter-list { display: flex; flex-direction: column; min-width: 0; padding: 25px 14px 16px; }
 .batch-writing-control { margin: 12px 0 10px; }
+.outline-json-toolbar { justify-content: flex-end; padding: 12px 24px 0; background: var(--paper, #faf7f2); }
 .batch-writing-control > .full { justify-content: center; font-size: 10px; }
 .batch-writing-status { display: flex; align-items: center; gap: 8px; color: var(--accent); }
 .batch-writing-status span { min-width: 0; flex: 1; }
