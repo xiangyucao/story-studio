@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import { normalizeCharacterImportData, normalizeCharacterName } from "./character-import";
 import { normalizeWorldEntryName, normalizeWorldImportData } from "./world-import";
+import { normalizeTimelineEventTitle, normalizeTimelineImportData } from "./timeline-import";
 
 const dataDir = process.env.STORY_STUDIO_DATA_DIR
   ? path.resolve(process.env.STORY_STUDIO_DATA_DIR)
@@ -503,6 +504,52 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
     case "delete-event":
       db.prepare("DELETE FROM story_events WHERE id=?").run(payload.id);
       return payload.id;
+    case "import-timeline-json": {
+      const projectId = String(payload.projectId || "");
+      if (!projectId) throw new Error("缺少作品编号");
+      const imported = normalizeTimelineImportData(payload.data);
+      return db.transaction(() => {
+        type EventRow = { id: string; title: string; story_time: string; description: string; causes: string; consequences: string };
+        const rows = db.prepare("SELECT id, title, story_time, description, causes, consequences FROM story_events WHERE project_id=?").all(projectId) as EventRow[];
+        const eventsByTitle = new Map(rows.map((row) => [normalizeTimelineEventTitle(row.title), row]));
+        let created = 0;
+        let updated = 0;
+        imported.events.forEach((event) => {
+          const key = normalizeTimelineEventTitle(event.title);
+          const existing = eventsByTitle.get(key);
+          if (existing) {
+            const merged = {
+              title: event.title,
+              story_time: event.storyTime || existing.story_time,
+              description: event.description || existing.description,
+              causes: event.causes || existing.causes,
+              consequences: event.consequences || existing.consequences,
+            };
+            db.prepare("UPDATE story_events SET title=?, story_time=?, description=?, causes=?, consequences=? WHERE id=?").run(
+              merged.title, merged.story_time, merged.description, merged.causes, merged.consequences, existing.id,
+            );
+            eventsByTitle.set(key, { ...existing, ...merged });
+            updated += 1;
+          } else {
+            const eventId = id();
+            const createdEvent = {
+              id: eventId,
+              title: event.title,
+              story_time: event.storyTime,
+              description: event.description,
+              causes: event.causes,
+              consequences: event.consequences,
+            };
+            db.prepare("INSERT INTO story_events VALUES (?, ?, NULL, ?, ?, ?, ?, ?)").run(
+              createdEvent.id, projectId, createdEvent.title, createdEvent.story_time, createdEvent.description, createdEvent.causes, createdEvent.consequences,
+            );
+            eventsByTitle.set(key, createdEvent);
+            created += 1;
+          }
+        });
+        return `新增 ${created} 个事件，更新 ${updated} 个事件；未删除任何原有事件`;
+      })();
+    }
     case "create-relationship": {
       if (payload.sourceCharacterId === payload.targetCharacterId) throw new Error("一条关系需要两个不同的人物");
       const characterCount = (db.prepare("SELECT COUNT(*) AS count FROM characters WHERE project_id=? AND id IN (?, ?)").get(
