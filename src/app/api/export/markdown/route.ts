@@ -29,10 +29,12 @@ export async function GET(request: NextRequest) {
         }),
       ]),
     ].filter(Boolean);
+    const safeTitle = workspace.project.title.trim().replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "") || "未命名作品";
+    const fileName = `${safeTitle}.md`;
     return new NextResponse(sections.join("\n\n"), {
       headers: {
         "Content-Type": "text/markdown; charset=utf-8",
-        "Content-Disposition": "attachment; filename=manuscript.md",
+        "Content-Disposition": `attachment; filename="manuscript.md"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       },
     });
   } catch (error) {

@@ -5,6 +5,13 @@ import { groupChaptersByVolume } from "@/lib/manuscript";
 import { PrintActions } from "./print-button";
 import styles from "./print.module.css";
 
+export async function generateMetadata({ params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
+  const workspace = getWorkspace(projectId);
+  const safeTitle = workspace.project.title.trim().replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "") || "未命名作品";
+  return { title: safeTitle };
+}
+
 export default async function ExportPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const workspace = getWorkspace(projectId);
