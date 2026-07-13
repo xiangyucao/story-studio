@@ -54,10 +54,10 @@ button { cursor: pointer; }
 .outline-json-toolbar { justify-content: flex-end; padding: 12px 24px 0; background: var(--paper, #faf7f2); }
 .import-diff-summary { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0 8px; }
 .import-diff-summary span { padding: 4px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; }
-.import-diff-summary .new, .diff-new { color: #27633b; background: #e4f3e8; }
-.import-diff-summary .changed, .diff-changed { color: #8a5b14; background: #fff0cf; }
-.import-diff-summary .unchanged, .diff-unchanged { color: #66706a; background: #ecefeb; }
-.import-diff-summary .deleted, .diff-deleted { color: #963c34; background: #f8dfdc; }
+.import-diff-summary .new, .import-status.diff-new { color: #27633b; background: #e4f3e8; }
+.import-diff-summary .changed, .import-status.diff-changed { color: #8a5b14; background: #fff0cf; }
+.import-diff-summary .unchanged, .import-status.diff-unchanged { color: #66706a; background: #ecefeb; }
+.import-diff-summary .deleted, .import-status.diff-deleted { color: #963c34; background: #f8dfdc; }
 .import-diff-groups { display: grid; gap: 14px; }
 .import-diff-groups section > h3 { margin: 4px 0 7px; font-size: 13px; }
 .batch-writing-control > .full { justify-content: center; font-size: 10px; }
