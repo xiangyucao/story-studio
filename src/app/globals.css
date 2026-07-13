@@ -60,6 +60,16 @@ button { cursor: pointer; }
 .import-diff-summary .deleted, .import-status.diff-deleted { color: #963c34; background: #f8dfdc; }
 .import-diff-groups { display: grid; gap: 14px; }
 .import-diff-groups section > h3 { margin: 4px 0 7px; font-size: 13px; }
+.app-dialog { width: min(540px, calc(100vw - 32px)); padding: 24px; border: 1px solid #e4d9ce; box-shadow: 0 24px 80px rgba(48, 37, 29, .22); }
+.app-dialog .modal-head h2 { margin-top: 5px; font-size: 24px; }
+.app-dialog-message { display: flex; gap: 11px; margin: 16px 0; padding: 14px 16px; color: #514a43; background: #f4f0e9; border-radius: 12px; }
+.app-dialog-message p { margin: 0; line-height: 1.65; white-space: pre-line; }
+.app-dialog-message.danger { color: #873d35; background: #fae8e4; }
+.app-dialog-message svg { flex: 0 0 auto; margin-top: 2px; }
+.app-dialog-fields { display: grid; gap: 12px; margin-top: 16px; max-height: 52vh; overflow: auto; }
+.app-dialog-fields textarea { min-height: 88px; }
+.app-dialog .modal-button-row { margin-top: 22px; }
+.app-dialog .modal-button-row button { min-width: 110px; justify-content: center; }
 .batch-writing-control > .full { justify-content: center; font-size: 10px; }
 .batch-writing-status { display: flex; align-items: center; gap: 8px; color: var(--accent); }
 .batch-writing-status span { min-width: 0; flex: 1; }
