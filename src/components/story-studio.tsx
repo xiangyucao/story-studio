@@ -15,6 +15,7 @@ import { normalizeTimelineEventTitle, parseTimelineImportJson, timelineImportExa
 import { parseManualAiResponse, type ManualAiAction } from "@/lib/manual-ai";
 import { exportOutlineJson, findChangedWrittenChapters, outlineJsonExample, parseOutlineJson, type OutlineJsonData } from "@/lib/outline-json";
 import { resolveWritingLanguage } from "@/lib/writing-language";
+import { batchRevisionExample, parseBatchRevisionJson, resolveBatchRevisionTargets } from "@/lib/batch-revision";
 
 type Tab = "write" | "outline" | "characters" | "world" | "logic" | "history";
 type AiAction = "outline" | "outline-volume" | "outline-node" | "compact-reference" | "expand" | "revise" | "logic";
@@ -155,6 +156,10 @@ export function StoryStudio() {
   const [collapsedWritingVolumes, setCollapsedWritingVolumes] = useState<Set<string>>(() => new Set());
   const [collapsedOutlineVolumes, setCollapsedOutlineVolumes] = useState<Set<string>>(() => new Set());
   const [batchWriting, setBatchWriting] = useState<BatchWritingProgress | null>(null);
+  const [batchRevision, setBatchRevision] = useState<BatchWritingProgress | null>(null);
+  const [batchRevisionOpen, setBatchRevisionOpen] = useState(false);
+  const [batchRevisionJson, setBatchRevisionJson] = useState(() => JSON.stringify(batchRevisionExample, null, 2));
+  const [batchRevisionError, setBatchRevisionError] = useState("");
   const stopBatchWritingRef = useRef(false);
   const [appDialog, setAppDialog] = useState<AppDialogState | null>(null);
   const appDialogResolverRef = useRef<((value: Record<string, string> | null) => void) | null>(null);
@@ -424,6 +429,65 @@ export function StoryStudio() {
       setMessage(`${stopped ? "批量写作已停止" : "批量写作完成"}：成功 ${succeeded} 章，失败 ${failed} 章${failures.length ? `；${failures.slice(0, 2).join("；")}` : ""}`);
     } finally {
       setBatchWriting(null);
+      setBusy(false);
+      stopBatchWritingRef.current = false;
+    }
+  };
+
+  const runBatchRevision = async () => {
+    if (!workspace || busy || batchRevision?.running) return;
+    if (settings.provider === "manual") {
+      setBatchRevisionError("批量修改需要可自动调用的本地模型或 OpenAI，不能使用外部手动模型");
+      return;
+    }
+    let targets;
+    try {
+      targets = resolveBatchRevisionTargets(workspace, parseBatchRevisionJson(batchRevisionJson));
+    } catch (error) {
+      setBatchRevisionError(error instanceof Error ? error.message : "JSON 校验失败");
+      return;
+    }
+    setBatchRevisionError("");
+    setBatchRevisionOpen(false);
+    stopBatchWritingRef.current = false;
+    let succeeded = 0;
+    let failed = 0;
+    const failures: string[] = [];
+    setBusy(true);
+    setMessage(`批量修改已开始，共 ${targets.length} 章`);
+    try {
+      for (let index = 0; index < targets.length; index += 1) {
+        if (stopBatchWritingRef.current) break;
+        const target = targets[index];
+        const chapter = target.chapterRecord;
+        const label = `第 ${target.volume} 卷第 ${target.chapter} 章 · ${chapter.title}`;
+        setBatchRevision({ running: true, current: index + 1, total: targets.length, chapterTitle: label, succeeded, failed });
+        try {
+          const proposal = await jsonFetch<AiProposal | ManualPromptResponse>("/api/ai", {
+            method: "POST",
+            body: JSON.stringify({ action: "revise", projectId: workspace.project.id, chapterId: chapter.id, selection: chapter.content, instruction: target.instruction, targetWordCount: chapter.targetWordCount || 3000, settings }),
+          });
+          if (proposal.type !== "text") throw new Error("模型没有返回修改后的章节正文");
+          if (proposal.targetChapterId && proposal.targetChapterId !== chapter.id) throw new Error("模型结果属于错误章节，已阻止写入");
+          await jsonFetch<{ result: string }>("/api/workspace", {
+            method: "POST",
+            body: JSON.stringify({ action: "save-chapter", payload: { ...chapter, content: proposal.result, instruction: `AI 批量修改：${target.instruction}`, clearOutlineStale: false } }),
+          });
+          const savedChapter = { ...chapter, content: proposal.result, wordCount: proposal.result.replace(/\s/g, "").length, updatedAt: new Date().toISOString() };
+          setWorkspace((current) => current ? { ...current, chapters: current.chapters.map((item) => item.id === savedChapter.id ? savedChapter : item) } : current);
+          setChapterDraft((current) => current?.id === savedChapter.id ? savedChapter : current);
+          succeeded += 1;
+        } catch (error) {
+          failed += 1;
+          failures.push(`${label}：${error instanceof Error ? error.message : "修改失败"}`);
+        }
+        setBatchRevision({ running: true, current: index + 1, total: targets.length, chapterTitle: label, succeeded, failed });
+      }
+      const stopped = stopBatchWritingRef.current;
+      await loadWorkspace(workspace.project.id);
+      setMessage(`${stopped ? "批量修改已停止" : "批量修改完成"}：成功 ${succeeded} 章，失败 ${failed} 章${failures.length ? `；${failures.slice(0, 2).join("；")}` : ""}`);
+    } finally {
+      setBatchRevision(null);
       setBusy(false);
       stopBatchWritingRef.current = false;
     }
@@ -918,6 +982,7 @@ export function StoryStudio() {
             <aside className="chapter-list panel-subtle">
               <div className="section-heading"><div><span className="eyebrow">MANUSCRIPT</span><h2>章节</h2></div><button className="tiny-button" onClick={() => void createChapterWithDialog()}><CirclePlus size={16} /></button></div>
               <div className="batch-writing-control">{batchWriting?.running ? <><div className="batch-writing-status"><LoaderCircle className="spin" size={15} /><span><strong>{batchWriting.current} / {batchWriting.total}</strong><small>{batchWriting.chapterTitle}</small></span></div><div className="batch-progress"><i style={{ width: `${Math.round((batchWriting.current / batchWriting.total) * 100)}%` }} /></div><button className="danger-text-button" onClick={() => { stopBatchWritingRef.current = true; setMessage("将在当前章节生成并保存后停止"); }}>停止</button></> : <button className="secondary-button full" disabled={busy || workspace.chapters.every((chapter) => chapter.content.trim())} onClick={() => void generateAllUnwrittenChapters()}><WandSparkles size={15} />批量扩写未写章节（{workspace.chapters.filter((chapter) => !chapter.content.trim()).length}）</button>}</div>
+              <div className="batch-writing-control batch-revision-control">{batchRevision?.running ? <><div className="batch-writing-status"><LoaderCircle className="spin" size={15} /><span><strong>{batchRevision.current} / {batchRevision.total}</strong><small>{batchRevision.chapterTitle}</small></span></div><div className="batch-progress"><i style={{ width: `${Math.round((batchRevision.current / batchRevision.total) * 100)}%` }} /></div><button className="danger-text-button" onClick={() => { stopBatchWritingRef.current = true; setMessage("将在当前章节修改并保存后停止"); }}>停止</button></> : <button className="secondary-button full" disabled={busy || !workspace.chapters.some((chapter) => chapter.content.trim())} onClick={() => { setBatchRevisionError(""); setBatchRevisionOpen(true); }}><FileText size={15} />JSON 批量修改章节</button>}</div>
               <div className="chapter-items">
                 <ManuscriptTree workspace={workspace} selectedChapterId={selectedChapterId} collapsedVolumes={collapsedWritingVolumes} onToggleVolume={(volumeId) => setCollapsedWritingVolumes((current) => toggleSetValue(current, volumeId))} onSelectChapter={selectChapter} />
               </div>
@@ -1007,6 +1072,7 @@ export function StoryStudio() {
       </section>
 
       {appDialog && <div className="modal-backdrop app-dialog-backdrop" onMouseDown={() => closeAppDialog(null)}><form className={appDialog.danger ? "settings-modal app-dialog danger-dialog" : "settings-modal app-dialog"} onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); closeAppDialog(Object.fromEntries(appDialog.fields.map((field) => [field.key, field.value]))); }}><div className="modal-head"><div><span className={appDialog.danger ? "eyebrow danger-eyebrow" : "eyebrow"}>{appDialog.eyebrow}</span><h2>{appDialog.title}</h2></div><button type="button" className="icon-button" aria-label="关闭对话框" onClick={() => closeAppDialog(null)}><X size={19} /></button></div>{appDialog.message && <div className={appDialog.danger ? "app-dialog-message danger" : "app-dialog-message"}>{appDialog.danger && <AlertTriangle size={21} />}<p>{appDialog.message}</p></div>}<div className="app-dialog-fields">{appDialog.fields.map((field, index) => <label className="field" key={field.key}><span>{field.label}{field.required ? " *" : ""}</span>{field.multiline ? <textarea autoFocus={index === 0} value={field.value} placeholder={field.placeholder} onChange={(event) => setAppDialog({ ...appDialog, fields: appDialog.fields.map((item) => item.key === field.key ? { ...item, value: event.target.value } : item) })} /> : <input autoFocus={index === 0} value={field.value} placeholder={field.placeholder} onChange={(event) => setAppDialog({ ...appDialog, fields: appDialog.fields.map((item) => item.key === field.key ? { ...item, value: event.target.value } : item) })} />}</label>)}</div><div className="modal-button-row"><button type="button" className="secondary-button" onClick={() => closeAppDialog(null)}>取消</button><button type="submit" className={appDialog.danger ? "danger-button" : "primary-button"} disabled={appDialog.fields.some((field) => field.required && !field.value.trim())}>{appDialog.confirmLabel}</button></div></form></div>}
+      {batchRevisionOpen && <div className="modal-backdrop" onMouseDown={() => setBatchRevisionOpen(false)}><section className="settings-modal wide-modal batch-revision-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">BATCH AI REVISION</span><h2>JSON 批量修改章节</h2></div><button className="icon-button" aria-label="关闭批量修改" onClick={() => setBatchRevisionOpen(false)}><X size={19} /></button></div><p className="modal-help">volume 和 chapter 都从 1 开始，指当前树状大纲中的第几卷、第几章。点击开始后不再确认，系统会按 JSON 顺序逐章修改、自动接受并保存；开始前会一次性校验全部目标。</p><label className="field batch-revision-field"><span>修改任务 JSON</span><textarea autoFocus spellCheck={false} value={batchRevisionJson} onChange={(event) => { setBatchRevisionJson(event.target.value); setBatchRevisionError(""); }} /></label><small className="batch-revision-note">外部分析工具附加的 [cite: 1] 等引用标记会自动移除，不会发送给写作模型。</small>{batchRevisionError && <div className="ai-error"><AlertTriangle size={16} /><span>{batchRevisionError}</span></div>}<div className="modal-button-row"><button className="secondary-button" onClick={() => setBatchRevisionJson(JSON.stringify(batchRevisionExample, null, 2))}>恢复示例</button><button className="primary-button" disabled={busy || !batchRevisionJson.trim()} onClick={() => void runBatchRevision()}><WandSparkles size={16} />立即批量修改并保存</button></div></section></div>}
       {settingsOpen && <div className="modal-backdrop" onMouseDown={() => setSettingsOpen(false)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">MODEL PROVIDER</span><h2>模型设置</h2></div><button className="icon-button" onClick={() => setSettingsOpen(false)}><X size={19} /></button></div>{settings.provider !== "manual" && <button className="secondary-button full-action" disabled={modelCheckBusy} onClick={() => void detectLocalModel(false)}>{modelCheckBusy ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}自动检测并连接本机 llama.cpp</button>}<Field label="提供方" value={settings.provider} options={[{ label: "OpenAI Responses API", value: "openai" }, { label: "本地 / OpenAI-compatible", value: "openai-compatible" }, { label: "外部模型（手动复制粘贴）", value: "manual" }]} onChange={(provider) => { const nextProvider = provider as ModelSettings["provider"]; setSettings({ ...settings, provider: nextProvider, model: nextProvider === "manual" ? "外部模型" : settings.model }); setModelCheckMessage(""); }} /><Field label={settings.provider === "manual" ? "外部模型名称（仅用于显示）" : "模型名称"} value={settings.model} onChange={(model) => setSettings({ ...settings, model })} />{settings.provider === "openai-compatible" && <><Field label="Base URL" value={settings.baseUrl || ""} onChange={(baseUrl) => setSettings({ ...settings, baseUrl })} /><button className="text-button model-test-button" disabled={modelCheckBusy} onClick={() => void detectLocalModel(true)}>测试这个地址</button></>}{modelCheckMessage && <div className={modelCheckMessage.startsWith("连接成功") ? "model-check success" : "model-check"}>{modelCheckMessage}</div>}<div className="security-note">{settings.provider === "manual" ? "系统不会连接外部服务。每次会生成包含必要资料的完整提示词，供你复制到 Gemini、Claude 或 NotebookLM，再把模型结果粘贴回来。" : <>API Key 不会存入浏览器。OpenAI 使用服务器端 <code>OPENAI_API_KEY</code>；本地模型默认无需密钥。</>}</div><button className="primary-button full" onClick={() => { localStorage.setItem("story-studio-model-settings", JSON.stringify(settings)); setSettingsOpen(false); setMessage("模型设置已保存在本机浏览器"); }}><Save size={17} />保存设置</button></section></div>}
       {exportOpen && <div className="modal-backdrop" onMouseDown={() => setExportOpen(false)}><section className="settings-modal export-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">EXPORT</span><h2>导出《{workspace.project.title}》</h2></div><button className="icon-button" onClick={() => setExportOpen(false)}><X size={19} /></button></div><div className="export-language"><span>输出文字</span><div className="segmented"><button className={exportScript === "simplified" ? "active" : ""} onClick={() => setExportScript("simplified")}>简体中文</button><button className={exportScript === "traditional" ? "active" : ""} onClick={() => setExportScript("traditional")}>繁體中文</button></div><small>只转换导出文件，数据库中的原文不会改变。</small></div><label className="export-toc-option"><input type="checkbox" checked={exportIncludeToc} onChange={(event) => setExportIncludeToc(event.target.checked)} /><span><strong>包含目录</strong><small>在正文前加入卷和章节目录。</small></span></label><div className="export-options"><button onClick={() => { window.open(`/export/${workspace.project.id}?script=${exportScript}&toc=${exportIncludeToc}`, "_blank", "noopener,noreferrer"); setExportOpen(false); }}><span className="export-icon"><Printer size={22} /></span><div><strong>PDF / 打印稿</strong><small>A4 专业排版，包含章节插画；在打印窗口选择“另存为 PDF”。</small></div><ChevronRight size={17} /></button><a href={`/api/export/docx?projectId=${workspace.project.id}&script=${exportScript}&toc=${exportIncludeToc}`} onClick={() => setExportOpen(false)}><span className="export-icon"><FileText size={22} /></span><div><strong>Word 文档 (.docx)</strong><small>包含封面、卷章层级、正文以及支持的章节插画。</small></div><ChevronRight size={17} /></a><a href={`/api/export/markdown?projectId=${workspace.project.id}&script=${exportScript}&toc=${exportIncludeToc}`} onClick={() => setExportOpen(false)}><span className="export-icon"><FileType2 size={22} /></span><div><strong>Markdown 原稿</strong><small>适合备份、版本管理以及导入其他写作工具。</small></div><ChevronRight size={17} /></a></div><div className="security-note">导出文件使用作品名；繁体转换基于 OpenCC，只影响本次导出。</div></section></div>}
       {nodeCreateDraft && <div className="modal-backdrop" onMouseDown={() => setNodeCreateDraft(null)}><section className="settings-modal" onMouseDown={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">INSERT OUTLINE NODE</span><h2>{nodeCreateDraft.heading}</h2></div><button className="icon-button" aria-label="关闭新增大纲节点" onClick={() => setNodeCreateDraft(null)}><X size={19} /></button></div><div className="node-kind-preview"><span className={`node-type ${nodeCreateDraft.type}`}>{nodeCreateDraft.type === "volume" ? "卷" : nodeCreateDraft.type === "chapter" ? "章" : "场"}</span><p>{nodeCreateDraft.type === "chapter" ? "保存后会同时建立对应的写作章节。" : nodeCreateDraft.type === "scene" ? "场景会归入当前章节，不单独建立正文文件。" : "新卷可以继续添加章节和场景。"}</p></div><Field label="标题" value={nodeCreateDraft.title} onChange={(title) => setNodeCreateDraft({ ...nodeCreateDraft, title })} /><Field label="剧情摘要 / 要完成的任务" value={nodeCreateDraft.summary} multiline onChange={(summary) => setNodeCreateDraft({ ...nodeCreateDraft, summary })} /><button className="primary-button full" disabled={busy || !nodeCreateDraft.title.trim()} onClick={() => void createOutlineNode()}><CirclePlus size={16} />确认插入</button></section></div>}

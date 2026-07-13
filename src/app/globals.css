@@ -89,6 +89,10 @@ button { cursor: pointer; }
 .batch-progress { height: 4px; margin: 7px 0 5px; overflow: hidden; background: #e7ded4; border-radius: 4px; }
 .batch-progress i { display: block; height: 100%; background: var(--accent); transition: width .25s ease; }
 .batch-writing-control .danger-text-button { padding: 2px 0; font-size: 9px; }
+.batch-revision-control { margin-top: -4px; }
+.batch-revision-modal { width: min(760px, 100%); }
+.batch-revision-field textarea { min-height: 360px; font-family: Consolas, "SFMono-Regular", monospace; font-size: 12px; line-height: 1.55; }
+.batch-revision-note { display: block; margin-top: -7px; color: var(--muted); font-size: 11px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .section-heading h2 { margin: 3px 0 0; font-family: Georgia, "Noto Serif SC", serif; font-size: 20px; }
 .chapter-items { display: flex; flex: 1; flex-direction: column; gap: 4px; margin-top: 20px; }
