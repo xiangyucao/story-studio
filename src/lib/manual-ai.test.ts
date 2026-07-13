@@ -26,6 +26,24 @@ describe("manual external AI workflow", () => {
     expect(prompt).not.toMatch(/[\u3400-\u9fff]/);
   });
 
+  it("续写只要求返回新增段落", () => {
+    const prompt = buildManualAiPrompt({
+      action: "continue", context: "人物与设定", instruction: "继续追逐场面", selection: "现有结尾",
+      targetChapter: { id: "c2", title: "第二章", summary: "追逐", targetWordCount: 3000 },
+    });
+    expect(prompt).toContain("只输出新增的正文段落");
+    expect(prompt).toContain("不得重复已有正文");
+  });
+
+  it("检查只要求报告而不是改写正文", () => {
+    const prompt = buildManualAiPrompt({
+      action: "logic", context: "Characters and timeline", instruction: "Check continuity.", outputLanguage: "en", selection: "Existing prose",
+      targetChapter: { id: "c2", title: "Chapter 2", summary: "A pursuit", targetWordCount: 3000 },
+    });
+    expect(prompt).toContain("Return only the English diagnostic report");
+    expect(prompt).toContain("Do not rewrite the chapter");
+  });
+
   it("parses structured outline responses inside code fences", () => {
     const result = parseManualAiResponse("outline", '```json\n{"rationale":"七卷推进","nodes":[{"type":"volume","title":"第一卷","summary":"开端"}]}\n```');
     expect(result.type).toBe("outline");

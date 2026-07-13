@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
   let logBase: Record<string, unknown> = { requestId };
   try {
     const body = await request.json() as {
-      action: "outline" | "outline-volume" | "outline-node" | "compact-reference" | "expand" | "revise" | "logic";
+      action: "outline" | "outline-volume" | "outline-node" | "compact-reference" | "expand" | "continue" | "revise" | "logic";
       projectId: string;
       chapterId?: string;
       instruction: string;
@@ -107,12 +107,16 @@ export async function POST(request: NextRequest) {
       : `【唯一目标章节】\n章节 ID：${targetChapter.id}\n章节标题：${targetChapter.title}\n章节大纲：${targetOutline?.summary || targetChapter.summary || "未填写"}\n建议字数：约 ${effectiveTargetWordCount} 字（允许上下浮动约 15%）\n硬性要求：只能处理这一章。相邻章节仅供衔接，绝不能把上一章或下一章当成写作目标。`;
     const task = language.code === "en" ? (body.action === "expand"
       ? `${language.directive} Expand “${targetChapter.title}” from the supplied outline and story facts. Write this chapter only. The title is stored separately, so do not output a title, chapter number, or “Chapter N”; begin with the first sentence of the narrative. Return only publication-ready prose with no explanation.`
+      : body.action === "continue"
+        ? `${language.directive} Continue from the exact end of the existing prose in “${targetChapter.title}”. Return only new publication-ready continuation paragraphs. Do not repeat, summarize, quote, or rewrite any existing passage. Do not output a title or explanation.`
       : body.action === "logic"
-        ? `${language.directive} Act as a continuity editor. Distinguish established evidence, reasonable inference, and missing information, and cite the relevant events.`
+        ? `${language.directive} Act as a continuity editor. Return a diagnostic report, not revised prose. Distinguish established evidence, reasonable inference, and missing information; cite relevant passages or events and give concrete repair suggestions.`
         : `${language.directive} Revise the selected text from “${targetChapter.title}” as requested. Preserve facts, character motivation, and point of view. Return only the complete revised text.`) : body.action === "expand"
       ? `${language.directive} 根据资料展开《${targetChapter.title}》。只能写这一章。章节标题已由系统单独保存，绝对不要输出标题、章号或“Chapter N”，直接从正文第一句开始。只输出可直接进入正文的文本，不解释过程。`
+      : body.action === "continue"
+        ? `${language.directive} 从《${targetChapter.title}》现有正文最后一句之后继续写作。只输出新增的正文段落，不得重复、概括、引用或改写任何已有文字，不要输出章节标题或解释。`
       : body.action === "logic"
-        ? `${language.directive} 作为连续性编辑，回答逻辑问题。必须区分已有证据、合理推断和资料缺口，并指出相关事件。`
+        ? `${language.directive} 作为连续性编辑输出检查报告，不要输出改写后的正文。必须区分已有证据、合理推断和资料缺口，引用相关段落或事件，并给出具体修改建议。`
         : `${language.directive} 作为文字编辑改写《${targetChapter.title}》的指定文本。保持事实、人物动机和视角不变，只输出修改后的完整文本。`;
     const selected = body.selection?.trim() || targetChapter.content || "";
     const prompt = language.code === "en"
@@ -120,11 +124,11 @@ export async function POST(request: NextRequest) {
       : `${targetBlock}\n\n${context}\n\n待处理文本：\n---\n${selected}\n---\n\n用户要求：${body.instruction}`;
     const result = await generateText(body.settings, task, prompt);
     const { returnedHeading, wrong } = hasWrongChapterHeading(result, targetChapter.title);
-    if (body.action === "expand" && wrong) {
+    if ((body.action === "expand" || body.action === "continue") && wrong) {
       writeAiLog({ ...logBase, stage: "rejected", returnedHeading, reason: "wrong-chapter-heading", resultLength: result.length, resultPreview: result.slice(0, 500) });
       throw new Error(`模型返回了“${returnedHeading}”，但当前目标是“${targetChapter.title}”。已阻止错误提案，请重试。日志编号：${requestId}`);
     }
-    const cleanResult = body.action === "expand" || body.action === "revise" ? stripLeadingChapterHeading(result) : result;
+    const cleanResult = body.action === "expand" || body.action === "continue" || body.action === "revise" ? stripLeadingChapterHeading(result) : result;
     writeAiLog({ ...logBase, stage: "complete", returnedHeading, strippedHeading: Boolean(returnedHeading && cleanResult !== result.trim()), resultLength: cleanResult.length, resultPreview: cleanResult.slice(0, 500) });
     return NextResponse.json({ type: "text", result: cleanResult, targetChapterId: targetChapter.id, requestId });
   } catch (error) {

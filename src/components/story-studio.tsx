@@ -18,7 +18,7 @@ import { resolveWritingLanguage } from "@/lib/writing-language";
 import { batchRevisionExample, parseBatchRevisionJson, resolveBatchRevisionTargets } from "@/lib/batch-revision";
 
 type Tab = "write" | "outline" | "characters" | "world" | "logic" | "history";
-type AiAction = "outline" | "outline-volume" | "outline-node" | "compact-reference" | "expand" | "revise" | "logic";
+type AiAction = "outline" | "outline-volume" | "outline-node" | "compact-reference" | "expand" | "continue" | "revise" | "logic";
 type NodeCreateDraft = { type: "volume" | "chapter" | "scene"; parentId: string | null; afterId: string | null; title: string; summary: string; heading: string };
 type RelationshipDraft = { sourceCharacterId: string; targetCharacterId: string; type: string; description: string };
 type ImportDiffItem = { status: "new" | "changed" | "unchanged" | "deleted"; label: string; detail: string };
@@ -83,7 +83,7 @@ type ModelDiscovery = { found: boolean; baseUrl: string; models: string[] };
 
 const isVolumeLikeNode = (node: Workspace["outline"][number]) => node.type === "volume" || (node.type === "chapter" && /^第[0-9一二三四五六七八九十百]+卷(?:[：:\s]|$)/.test(node.title));
 const providerLabel = (settings: ModelSettings) => settings.provider === "manual" ? "外部手动模型" : settings.provider === "openai-compatible" ? "本地模型" : "OpenAI";
-const isManualTextAction = (action: ManualAiAction) => action === "expand" || action === "revise" || action === "logic" || action === "compact-reference";
+const isManualTextAction = (action: ManualAiAction) => action === "expand" || action === "continue" || action === "revise" || action === "logic" || action === "compact-reference";
 const sameFields = (left: Record<string, unknown>, right: Record<string, unknown>, fields: string[]) => fields.every((field) => (left[field] ?? "") === (right[field] ?? ""));
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
@@ -320,6 +320,16 @@ export function StoryStudio() {
     }
   };
 
+  const reviseFromLogicReport = () => {
+    if (!proposal || proposal.type !== "text" || !chapterDraft) return;
+    const instruction = activeWritingLanguage === "en"
+      ? `Revise the complete chapter to address the following continuity report. Preserve passages that are not implicated, make the smallest effective changes, and return only the complete revised prose.\n\nCONTINUITY REPORT:\n${proposal.result}`
+      : `根据以下连续性检查报告修改完整章节。保留没有问题的段落，只做解决问题所需的最小改动，并只输出修改后的完整正文。\n\n检查报告：\n${proposal.result}`;
+    setAiAction("revise");
+    setAiInstruction(instruction);
+    void callAi("revise", instruction);
+  };
+
   const detectLocalModel = async (useCurrentUrl = false) => {
     setModelCheckBusy(true);
     setModelCheckMessage("正在检测本机模型服务……");
@@ -347,7 +357,12 @@ export function StoryStudio() {
         setMessage("这份 AI 提案属于另一个章节，已阻止误写入。请回到原章节接受，或在当前章节重新生成。");
         return;
       }
-      await saveChapter(`AI：${aiInstruction || "按最新大纲生成"}`, proposal.result, proposalAction === "expand");
+      if (proposalAction === "logic") {
+        setMessage("检查报告不会直接写入正文；可点击“根据检查结果修改正文”生成修订稿");
+        return;
+      }
+      const content = proposalAction === "continue" ? [chapterDraft?.content.trim(), proposal.result.trim()].filter(Boolean).join("\n\n") : proposal.result;
+      await saveChapter(`AI：${aiInstruction || "按最新大纲生成"}`, content, proposalAction === "expand");
     } else if (proposal.type === "outline-node") {
       if (!outlineDraft) return;
       await mutate("save-outline-node", { ...outlineDraft, title: proposal.proposal.title, summary: proposal.proposal.summary });
@@ -1004,13 +1019,13 @@ export function StoryStudio() {
               <div className="ai-heading"><div className="ai-orb"><Sparkles size={19} /></div><div><h2>AI 编辑</h2><span>先预览，再应用</span></div></div>
               <div className="segmented">
                 <button className={aiAction === "revise" ? "active" : ""} onClick={() => setAiAction("revise")}>改写</button>
-                <button className={aiAction === "expand" ? "active" : ""} onClick={() => setAiAction("expand")}>续写</button>
+                <button className={aiAction === "continue" ? "active" : ""} onClick={() => setAiAction("continue")}>续写</button>
                 <button className={aiAction === "logic" ? "active" : ""} onClick={() => setAiAction("logic")}>检查</button>
               </div>
               <textarea className="prompt-box" value={aiInstruction} onChange={(e) => setAiInstruction(e.target.value)} placeholder="例如：加强林月收到信后的不安，但不要增加新事实……" />
               <button className="primary-button full" disabled={busy || !aiInstruction.trim()} onClick={() => void callAi()}><Bot size={17} />生成提案</button>
               <div className="context-note context-summary"><BrainCircuit size={16} /><div><strong>本次 AI 上下文</strong><span>人物 {contextStats.characters} · 关系 {contextStats.relationships} · 硬设定 {contextStats.canon} · 事件链 {contextStats.events} · 本章场景 {contextStats.scenes}</span><small>同时附带完整大纲及当前章前后一章的正文，用于保持连续性。</small></div></div>
-              {proposal && <ProposalCard proposal={proposal} onApply={() => void applyProposal()} onClose={() => setProposal(null)} />}
+              {proposal && <ProposalCard proposal={proposal} title={proposalAction === "logic" ? "AI 检查报告" : proposalAction === "continue" ? "AI 续写内容" : "AI 提案"} fullText={proposalAction === "logic"} onApply={proposalAction === "logic" ? undefined : () => void applyProposal()} onSecondary={proposalAction === "logic" ? reviseFromLogicReport : undefined} secondaryLabel="根据检查结果修改正文" onClose={() => setProposal(null)} />}
             </aside>
           </div>
         )}
@@ -1171,8 +1186,8 @@ function OutlineTreeBranch({ node, nodes, selectedId, collapsedVolumes, onToggle
   return <div className={`outline-branch depth-${node.type}`}><div className="outline-tree-row">{node.type === "volume" ? <button className="tree-toggle" title={collapsed ? "展开本卷" : "收起本卷"} aria-label={`${collapsed ? "展开" : "收起"}《${node.title}》`} aria-expanded={!collapsed} onClick={() => onToggleVolume(node.id)}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</button> : <span className="tree-guide" />}<button className={`outline-node${node.id === selectedId ? " selected" : ""}`} onClick={() => onSelect(node)}><span className={`node-type ${node.type}`}>{node.type === "volume" ? "卷" : node.type === "chapter" ? "章" : "场"}</span><div><h3>{node.title}</h3><p>{node.summary || "尚未填写摘要"}</p></div><span className="status-pill">v{node.revision} · {node.status}</span></button></div>{!collapsed && children.map((child) => <OutlineTreeBranch key={child.id} node={child} nodes={nodes} selectedId={selectedId} collapsedVolumes={collapsedVolumes} onToggleVolume={onToggleVolume} onSelect={onSelect} />)}</div>;
 }
 
-function ProposalCard({ proposal, onApply, onClose }: { proposal: AiProposal; onApply: () => void; onClose: () => void }) {
-  return <div className="proposal-card"><div className="proposal-head"><strong>AI 提案</strong><button onClick={onClose}><X size={15} /></button></div>{proposal.type === "text" ? <p>{proposal.result.slice(0, 900)}{proposal.result.length > 900 ? "…" : ""}</p> : proposal.type === "outline-node" ? <div><p>{proposal.proposal.rationale}</p><div className="proposal-node"><span>节点</span><strong>{proposal.proposal.title}</strong><small>{proposal.proposal.summary}</small></div></div> : <div><p>{proposal.proposal.rationale}</p>{proposal.proposal.nodes.map((node, index) => <div className="proposal-node" key={`${node.title}-${index}`}><span>{node.type}</span><strong>{node.title}</strong><small>{node.summary}</small></div>)}</div>}{proposal.type === "text" && proposal.requestId && <small className="proposal-log-id">日志编号：{proposal.requestId}</small>}<button className="accept-button" onClick={onApply}><Check size={16} />接受并写入</button></div>;
+function ProposalCard({ proposal, onApply, onClose, title = "AI 提案", onSecondary, secondaryLabel, fullText = false }: { proposal: AiProposal; onApply?: () => void; onClose: () => void; title?: string; onSecondary?: () => void; secondaryLabel?: string; fullText?: boolean }) {
+  return <div className="proposal-card"><div className="proposal-head"><strong>{title}</strong><button onClick={onClose}><X size={15} /></button></div>{proposal.type === "text" ? <p>{fullText ? proposal.result : proposal.result.slice(0, 900)}{!fullText && proposal.result.length > 900 ? "…" : ""}</p> : proposal.type === "outline-node" ? <div><p>{proposal.proposal.rationale}</p><div className="proposal-node"><span>节点</span><strong>{proposal.proposal.title}</strong><small>{proposal.proposal.summary}</small></div></div> : <div><p>{proposal.proposal.rationale}</p>{proposal.proposal.nodes.map((node, index) => <div className="proposal-node" key={`${node.title}-${index}`}><span>{node.type}</span><strong>{node.title}</strong><small>{node.summary}</small></div>)}</div>}{proposal.type === "text" && proposal.requestId && <small className="proposal-log-id">日志编号：{proposal.requestId}</small>}{onSecondary && <button className="secondary-button full-action" onClick={onSecondary}><Sparkles size={16} />{secondaryLabel}</button>}{onApply && <button className="accept-button" onClick={onApply}><Check size={16} />接受并写入</button>}</div>;
 }
 
 function Field({ label, value, onChange, multiline, options }: { label: string; value: string; onChange: (value: string) => void; multiline?: boolean; options?: Array<{ label: string; value: string }> }) {
