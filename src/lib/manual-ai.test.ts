@@ -16,6 +16,16 @@ describe("manual external AI workflow", () => {
     expect(parseManualAiResponse("expand", "新的完整正文", "c6")).toEqual({ type: "text", result: "新的完整正文", targetChapterId: "c6" });
   });
 
+  it("uses an entirely English system-generated prompt for an English work", () => {
+    const prompt = buildManualAiPrompt({
+      action: "expand", context: "Characters: Mara\nHard settings: frozen harbor", instruction: "Increase the tension.", outputLanguage: "en",
+      targetChapter: { id: "c3", title: "Chapter 3: The Last Signal", summary: "Mara finds the transmitter.", targetWordCount: 3200 },
+    });
+    expect(prompt).toContain("ONLY TARGET CHAPTER");
+    expect(prompt).toContain("Write only in English");
+    expect(prompt).not.toMatch(/[\u3400-\u9fff]/);
+  });
+
   it("parses structured outline responses inside code fences", () => {
     const result = parseManualAiResponse("outline", '```json\n{"rationale":"七卷推进","nodes":[{"type":"volume","title":"第一卷","summary":"开端"}]}\n```');
     expect(result.type).toBe("outline");
