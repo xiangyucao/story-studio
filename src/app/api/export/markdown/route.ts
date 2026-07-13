@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWorkspace } from "@/lib/db";
 import { groupChaptersByVolume } from "@/lib/manuscript";
+import { stripLeadingChapterHeading } from "@/lib/chapter-target";
 import { convertChinese, safeExportName, scriptFrom } from "@/lib/chinese";
 
 export const runtime = "nodejs";
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
           const images = workspace.illustrations.filter((image) => image.chapterId === chapter.id);
           return [
             `\n### ${t(chapter.title)}`,
-            t(chapter.content),
+            t(stripLeadingChapterHeading(chapter.content)),
             ...images.map((image) => `\n![${t(image.caption || image.fileName)}](/api/assets/${image.id})\n${image.caption ? `*${t(image.caption)}*` : ""}`),
           ];
         }),

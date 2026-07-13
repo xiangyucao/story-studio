@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { dataDir, getIllustrationAsset, getWorkspace } from "@/lib/db";
 import { convertChinese, safeExportName, scriptFrom } from "@/lib/chinese";
 import { groupChaptersByVolume } from "@/lib/manuscript";
+import { stripLeadingChapterHeading } from "@/lib/chapter-target";
 
 export const runtime = "nodejs";
 
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest) {
       for (let chapterIndex = 0; chapterIndex < group.chapters.length; chapterIndex += 1) {
         const chapter = group.chapters[chapterIndex];
         children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, pageBreakBefore: chapterIndex > 0, children: [new TextRun({ text: t(chapter.title), bold: true })] }));
-        chapter.content.split(/\n+/).filter(Boolean).forEach((text) => children.push(new Paragraph({ spacing: { line: 360, after: 180 }, indent: { firstLine: 480 }, children: [new TextRun({ text: t(text), size: 24 })] })));
+        stripLeadingChapterHeading(chapter.content).split(/\n+/).filter(Boolean).forEach((text) => children.push(new Paragraph({ spacing: { line: 360, after: 180 }, indent: { firstLine: 480 }, children: [new TextRun({ text: t(text), size: 24 })] })));
         for (const illustration of workspace.illustrations.filter((image) => image.chapterId === chapter.id)) {
           const asset = getIllustrationAsset(illustration.id);
           if (!asset || !["image/png", "image/jpeg"].includes(asset.mime_type)) continue;

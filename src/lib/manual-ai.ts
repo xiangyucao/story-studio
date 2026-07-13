@@ -67,7 +67,7 @@ export function buildManualAiPrompt(request: ManualAiRequest) {
     `【任务】\n${task}`,
     `【待处理文本】\n---\n${request.selection || "（本章尚无正文）"}\n---`,
     `【用户要求】\n${request.instruction}`,
-    "【输出格式】\n只输出可直接写入本章的完整中文正文，不解释过程，不要输出其他章节。若输出章节标题，必须与目标章节标题一致。",
+    "【输出格式】\n只输出可直接写入本章的完整正文，不解释过程，不要输出其他章节。章节标题已由系统单独保存，绝对不要输出标题、章号或 Chapter N，直接从正文第一句开始。",
   ].join("\n\n");
 }
 

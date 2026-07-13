@@ -2,6 +2,7 @@
 import { Fragment } from "react";
 import { getWorkspace } from "@/lib/db";
 import { groupChaptersByVolume } from "@/lib/manuscript";
+import { stripLeadingChapterHeading } from "@/lib/chapter-target";
 import { PrintActions } from "./print-button";
 import styles from "./print.module.css";
 import { convertChinese, safeExportName, scriptFrom } from "@/lib/chinese";
@@ -45,7 +46,7 @@ export default async function ExportPage({ params, searchParams }: { params: Pro
           const illustrations = workspace.illustrations.filter((image) => image.chapterId === chapter.id);
           return <section className={styles.chapter} key={chapter.id}>
             <header><span>CHAPTER {chapter.position + 1}</span><h2>{t(chapter.title)}</h2></header>
-            <div className={styles.prose}>{chapter.content.split(/\n+/).filter(Boolean).map((paragraph, index) => <p key={index}>{t(paragraph)}</p>)}</div>
+            <div className={styles.prose}>{stripLeadingChapterHeading(chapter.content).split(/\n+/).filter(Boolean).map((paragraph, index) => <p key={index}>{t(paragraph)}</p>)}</div>
             {illustrations.map((image) => <figure key={image.id}><img src={`/api/assets/${image.id}`} alt={t(image.caption || image.fileName)} />{image.caption && <figcaption>{t(image.caption)}</figcaption>}</figure>)}
           </section>;
         })}
