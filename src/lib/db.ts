@@ -42,6 +42,7 @@ db.exec(`
     style_guide TEXT NOT NULL DEFAULT '',
     reference_title TEXT NOT NULL DEFAULT '',
     reference_text TEXT NOT NULL DEFAULT '',
+    writing_language TEXT NOT NULL DEFAULT 'auto',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -146,6 +147,7 @@ ensureColumn("chapters", "based_on_outline_revision", "INTEGER NOT NULL DEFAULT 
 ensureColumn("chapters", "target_word_count", "INTEGER NOT NULL DEFAULT 3000");
 ensureColumn("projects", "reference_title", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("projects", "reference_text", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("projects", "writing_language", "TEXT NOT NULL DEFAULT 'auto'");
 const legacyProjectColumns = db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
 if (legacyProjectColumns.some((column) => column.name === "reference_sample")) {
   db.exec("UPDATE projects SET reference_text=reference_sample, reference_sample='' WHERE TRIM(reference_sample)<>''");
@@ -175,6 +177,7 @@ function projectFrom(row: Row): Project {
     id: String(row.id), title: String(row.title), genre: String(row.genre),
     premise: String(row.premise), styleGuide: String(row.style_guide),
     referenceTitle: String(row.reference_title || ""), referenceText: String(row.reference_text || ""),
+    writingLanguage: (["auto", "zh-CN", "zh-TW", "en"].includes(String(row.writing_language)) ? String(row.writing_language) : "auto") as Project["writingLanguage"],
     createdAt: String(row.created_at), updatedAt: String(row.updated_at),
   };
 }
@@ -294,8 +297,8 @@ export function cloneProjectForRewrite(sourceProjectId: string, requestedTitle?:
   const title = requestedTitle?.trim() || `${String(source.title)}（重写副本）`;
 
   db.transaction(() => {
-    db.prepare("INSERT INTO projects (id, title, genre, premise, style_guide, reference_title, reference_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
-      projectId, title, source.genre, source.premise, source.style_guide, source.reference_title, source.reference_text, timestamp, timestamp,
+    db.prepare("INSERT INTO projects (id, title, genre, premise, style_guide, reference_title, reference_text, writing_language, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      projectId, title, source.genre, source.premise, source.style_guide, source.reference_title, source.reference_text, source.writing_language || "auto", timestamp, timestamp,
     );
     const addOutline = db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
     outlineRows.forEach((row) => addOutline.run(
@@ -438,7 +441,7 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
       return JSON.stringify({ created, updated, changedChapters, clearedChapters });
     }
     case "save-project":
-      db.prepare("UPDATE projects SET title=?, genre=?, premise=?, style_guide=?, reference_title=?, reference_text=?, updated_at=? WHERE id=?").run(payload.title, payload.genre, payload.premise, payload.styleGuide, payload.referenceTitle ?? "", payload.referenceText ?? "", timestamp, payload.id);
+      db.prepare("UPDATE projects SET title=?, genre=?, premise=?, style_guide=?, reference_title=?, reference_text=?, writing_language=?, updated_at=? WHERE id=?").run(payload.title, payload.genre, payload.premise, payload.styleGuide, payload.referenceTitle ?? "", payload.referenceText ?? "", ["auto", "zh-CN", "zh-TW", "en"].includes(String(payload.writingLanguage)) ? payload.writingLanguage : "auto", timestamp, payload.id);
       return payload.id;
     case "delete-project": {
       const projectId = String(payload.id || "");

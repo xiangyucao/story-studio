@@ -6,6 +6,7 @@ import { clearLocalModelContext, generateOutline, generateOutlineNode, generateR
 import { writeAiLog } from "@/lib/ai-log";
 import { hasWrongChapterHeading, stripLeadingChapterHeading } from "@/lib/chapter-target";
 import { buildManualAiPrompt } from "@/lib/manual-ai";
+import { resolveWritingLanguage } from "@/lib/writing-language";
 import type { ModelSettings } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -30,6 +31,10 @@ export async function POST(request: NextRequest) {
     const workspace = getWorkspace(body.projectId);
     const targetChapter = body.chapterId ? workspace.chapters.find((chapter) => chapter.id === body.chapterId) : undefined;
     const targetOutline = targetChapter?.outlineNodeId ? workspace.outline.find((node) => node.id === targetChapter.outlineNodeId) : undefined;
+    const language = resolveWritingLanguage(workspace.project, targetChapter
+      ? [targetChapter.title, targetOutline?.summary || "", targetChapter.summary]
+      : workspace.outline.flatMap((node) => [node.title, node.summary]));
+    const languageInstruction = `【Required output language】\n${language.directive}`;
     logBase = {
       requestId,
       action: body.action,
@@ -53,7 +58,7 @@ export async function POST(request: NextRequest) {
       const prompt = buildManualAiPrompt({
         action: body.action,
         context,
-        instruction: body.instruction,
+        instruction: `${body.instruction}\n\n${languageInstruction}`,
         selection: body.selection,
         count,
         targetLength: body.referenceLength,
@@ -78,27 +83,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ type: "reference-sample", result, requestId });
     }
     if (body.action === "outline") {
-      const proposal = await generateOutline(body.settings, context, body.instruction, count);
+      const proposal = await generateOutline(body.settings, context, `${body.instruction}\n\n${languageInstruction}`, count);
       writeAiLog({ ...logBase, stage: "complete", nodeCount: proposal.nodes.length });
       return NextResponse.json({ type: "outline", proposal, requestId });
     }
     if (body.action === "outline-volume") {
-      const proposal = await generateVolumeExpansion(body.settings, context, body.selection || "", body.instruction, count);
+      const proposal = await generateVolumeExpansion(body.settings, context, body.selection || "", `${body.instruction}\n\n${languageInstruction}`, count);
       writeAiLog({ ...logBase, stage: "complete", nodeCount: proposal.nodes.length });
       return NextResponse.json({ type: "outline-volume", proposal, requestId });
     }
     if (body.action === "outline-node") {
-      const proposal = await generateOutlineNode(body.settings, context, body.selection || "", body.instruction);
+      const proposal = await generateOutlineNode(body.settings, context, body.selection || "", `${body.instruction}\n\n${languageInstruction}`);
       writeAiLog({ ...logBase, stage: "complete" });
       return NextResponse.json({ type: "outline-node", proposal, requestId });
     }
     if (!targetChapter) throw new Error("当前目标章节不存在，请重新选择章节后再试");
     const targetBlock = `【唯一目标章节】\n章节 ID：${targetChapter.id}\n章节标题：${targetChapter.title}\n章节大纲：${targetOutline?.summary || targetChapter.summary || "未填写"}\n建议字数：约 ${effectiveTargetWordCount} 字（允许上下浮动约 15%）\n硬性要求：只能处理这一章。相邻章节仅供衔接，绝不能把上一章或下一章当成写作目标。`;
     const task = body.action === "expand"
-      ? `根据资料展开《${targetChapter.title}》。只能写这一章。章节标题已由系统单独保存，绝对不要输出标题、章号或“Chapter N”，直接从正文第一句开始。只输出可直接进入正文的文本，不解释过程。`
+      ? `${language.directive} 根据资料展开《${targetChapter.title}》。只能写这一章。章节标题已由系统单独保存，绝对不要输出标题、章号或“Chapter N”，直接从正文第一句开始。只输出可直接进入正文的文本，不解释过程。`
       : body.action === "logic"
-        ? "作为连续性编辑，回答逻辑问题。必须区分已有证据、合理推断和资料缺口，并指出相关事件。"
-        : `作为文字编辑改写《${targetChapter.title}》的指定文本。保持事实、人物动机和视角不变，只输出修改后的完整文本。`;
+        ? `${language.directive} 作为连续性编辑，回答逻辑问题。必须区分已有证据、合理推断和资料缺口，并指出相关事件。`
+        : `${language.directive} 作为文字编辑改写《${targetChapter.title}》的指定文本。保持事实、人物动机和视角不变，只输出修改后的完整文本。`;
     const selected = body.selection?.trim() || targetChapter.content || "";
     const prompt = `${targetBlock}\n\n${context}\n\n待处理文本：\n---\n${selected}\n---\n\n用户要求：${body.instruction}`;
     const result = await generateText(body.settings, task, prompt);

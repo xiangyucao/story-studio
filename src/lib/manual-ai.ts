@@ -17,8 +17,8 @@ export type ManualParsedProposal =
   | { type: "outline-node"; proposal: { rationale: string; title: string; summary: string } };
 
 const structuredOutput = (action: ManualAiAction, count: number) => {
-  if (action === "outline") return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"设计说明","nodes":[{"type":"volume","title":"第一卷：标题","summary":"本卷介绍"}]}\n必须恰好包含 ${count} 个 volume 节点。`;
-  if (action === "outline-volume") return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"设计说明","nodes":[{"type":"chapter","title":"第1章：标题","summary":"章节介绍"},{"type":"scene","title":"场景标题","summary":"场景介绍"}]}\n必须恰好包含 ${count} 个 chapter；scene 可选并紧跟所属章。`;
+  if (action === "outline") return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"design rationale","nodes":[{"type":"volume","title":"volume title in the required language","summary":"volume summary in the required language"}]}\n必须恰好包含 ${count} 个 volume 节点。`;
+  if (action === "outline-volume") return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"design rationale","nodes":[{"type":"chapter","title":"chapter title in the required language","summary":"chapter summary in the required language"},{"type":"scene","title":"scene title in the required language","summary":"scene summary in the required language"}]}\n必须恰好包含 ${count} 个 chapter；scene 可选并紧跟所属章。`;
   return `只返回 JSON，不要使用 Markdown 代码块：\n{"rationale":"修改说明","title":"修改后的标题","summary":"修改后的摘要"}`;
 };
 

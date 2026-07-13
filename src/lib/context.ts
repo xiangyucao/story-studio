@@ -1,4 +1,5 @@
 import type { Workspace } from "./types";
+import { resolveWritingLanguage } from "./writing-language";
 
 export function buildStoryContext(workspace: Workspace, chapterId?: string) {
   const chapter = workspace.chapters.find((item) => item.id === chapterId);
@@ -32,8 +33,10 @@ export function buildStoryContext(workspace: Workspace, chapterId?: string) {
     : item.id === chapter.id
       ? "当前唯一目标章节"
       : item.position < chapter.position ? "上一章（仅供衔接）" : "下一章（仅供衔接）";
+  const language = resolveWritingLanguage(workspace.project, [chapter?.title || "", chapterOutline?.summary || "", chapter?.summary || ""]);
   return [
     `作品：${workspace.project.title}`,
+    `写作语言：${language.label}（${workspace.project.writingLanguage === "auto" || !workspace.project.writingLanguage ? "根据当前作品资料自动识别" : "用户已明确指定"}）`,
     `类型：${workspace.project.genre || "未设定"}`,
     `核心构想：${workspace.project.premise || "未设定"}`,
     `写作规则：${workspace.project.styleGuide || "未设定"}`,

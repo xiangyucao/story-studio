@@ -1,3 +1,5 @@
+export type WritingLanguage = "auto" | "zh-CN" | "zh-TW" | "en";
+
 export type Project = {
   id: string;
   title: string;
@@ -6,6 +8,7 @@ export type Project = {
   styleGuide: string;
   referenceTitle: string;
   referenceText: string;
+  writingLanguage?: WritingLanguage;
   createdAt: string;
   updatedAt: string;
 };

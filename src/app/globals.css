@@ -202,6 +202,7 @@ button { cursor: pointer; }
 .reference-compact-head label span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; font-weight: 700; }
 .reference-compact-head input { width: 100%; padding: 9px; background: white; border: 1px solid var(--line); border-radius: 7px; }
 .foundation-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+.foundation-language-help { display: block; margin: -7px 0 13px; color: var(--muted); font-size: 11px; }
 .outline-tree, .detail-editor, .inline-ai-card, .logic-result { padding: 22px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
 .outline-tree-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 7px 14px; border-bottom: 1px solid #eee8df; }
 .outline-tree-header strong { display: block; margin-top: 4px; font-family: Georgia, "Noto Serif SC", serif; font-size: 14px; }
