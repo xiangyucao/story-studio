@@ -1,3 +1,6 @@
+import type { ResolvedWritingLanguage } from "./writing-language";
+import { aiPromptLocales } from "./ai-prompt-i18n";
+
 export type ManualAiAction = "outline" | "outline-volume" | "outline-node" | "compact-reference" | "expand" | "continue" | "revise" | "logic";
 
 export type ManualAiRequest = {
@@ -8,7 +11,7 @@ export type ManualAiRequest = {
   count?: number;
   targetLength?: number;
   targetChapter?: { id: string; title: string; summary: string; targetWordCount: number };
-  outputLanguage?: "zh-CN" | "zh-TW" | "en";
+  outputLanguage?: ResolvedWritingLanguage;
 };
 
 export type ManualParsedProposal =
@@ -25,6 +28,22 @@ const structuredOutput = (action: ManualAiAction, count: number) => {
 
 export function buildManualAiPrompt(request: ManualAiRequest) {
   const count = Math.max(1, Math.min(20, Math.round(request.count || 7)));
+  if (request.outputLanguage && request.action !== "compact-reference") {
+    const locale = aiPromptLocales[request.outputLanguage];
+    if (request.action === "outline") return [locale.outlineSystem(count), request.context, `${locale.userRequest}:\n${request.instruction}`, locale.jsonOutline].join("\n\n");
+    if (request.action === "outline-volume") return [locale.volumeSystem(count), request.context, locale.volumeInput("", request.selection || locale.notProvided, request.instruction, count), locale.jsonVolume].join("\n\n");
+    if (request.action === "outline-node") return [locale.nodeSystem, request.context, locale.nodeInput("", request.selection || locale.notProvided, request.instruction), locale.jsonNode].join("\n\n");
+    if (!request.targetChapter) throw new Error("Target chapter is missing");
+    const target = request.targetChapter;
+    const task = request.action === "expand" ? locale.expand(target.title) : request.action === "continue" ? locale.continue(target.title) : request.action === "logic" ? locale.logic : locale.revise(target.title);
+    return [
+      `${locale.onlyTarget}\n${locale.chapterId}: ${target.id}\n${locale.chapterTitle}: ${target.title}\n${locale.chapterOutline}: ${target.summary || locale.notProvided}\n${locale.suggestedLength(target.targetWordCount || 3000)}\n${locale.hardConstraint}`,
+      request.context,
+      task,
+      `${locale.textToProcess}:\n---\n${request.selection || ""}\n---`,
+      `${locale.userRequest}:\n${request.instruction}`,
+    ].join("\n\n");
+  }
   if (request.outputLanguage === "en") {
     if (request.action === "outline") return [
       "You are a long-form fiction outline editor. Respect all characters, relationships, hard settings, and causal chains. Follow supplied genre, premise, and writing rules. If any are missing, infer them from the style reference and create a new story without copying its characters, plot, proper nouns, or wording. Plan volumes only; do not write chapters, scenes, or prose. All creative text must be in English.",

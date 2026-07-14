@@ -7,6 +7,7 @@ import { writeAiLog } from "@/lib/ai-log";
 import { hasWrongChapterHeading, stripLeadingChapterHeading } from "@/lib/chapter-target";
 import { buildManualAiPrompt } from "@/lib/manual-ai";
 import { resolveWritingLanguage } from "@/lib/writing-language";
+import { aiPromptLocales } from "@/lib/ai-prompt-i18n";
 import type { ModelSettings } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -34,9 +35,11 @@ export async function POST(request: NextRequest) {
     const language = resolveWritingLanguage(workspace.project, targetChapter
       ? [targetChapter.title, targetOutline?.summary || "", targetChapter.summary]
       : workspace.outline.flatMap((node) => [node.title, node.summary]));
-    const languageInstruction = `【Required output language】\n${language.directive}`;
-    const effectiveInstruction = language.code === "en" && body.action === "outline-volume" && body.instruction.startsWith("根据以下本卷介绍展开章节")
-      ? "Expand the selected volume into a continuous sequence of chapters. Give every chapter a clear English title and actionable English summary, and do not repeat other volumes."
+    const count = Math.max(1, Math.min(20, Math.round(Number(body.count) || 7)));
+    const locale = aiPromptLocales[language.code];
+    const languageInstruction = language.directive;
+    const effectiveInstruction = !["zh-CN", "zh-TW"].includes(language.code) && body.action === "outline-volume" && body.instruction.startsWith("根据以下本卷介绍展开章节")
+      ? locale.volumeSystem(count)
       : body.instruction;
     logBase = {
       requestId,
@@ -55,7 +58,6 @@ export async function POST(request: NextRequest) {
     };
     writeAiLog({ ...logBase, stage: "request" });
     const context = buildStoryContext(workspace, body.chapterId);
-    const count = Math.max(1, Math.min(20, Math.round(Number(body.count) || 7)));
     const effectiveTargetWordCount = Math.max(300, Math.min(50000, Math.round(Number(body.targetWordCount) || targetChapter?.targetWordCount || 3000)));
     if (body.settings.provider === "manual") {
       const prompt = buildManualAiPrompt({
@@ -102,26 +104,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ type: "outline-node", proposal, requestId });
     }
     if (!targetChapter) throw new Error("当前目标章节不存在，请重新选择章节后再试");
-    const targetBlock = language.code === "en"
-      ? `ONLY TARGET CHAPTER\nChapter ID: ${targetChapter.id}\nChapter title: ${targetChapter.title}\nChapter outline: ${targetOutline?.summary || targetChapter.summary || "Not provided"}\nSuggested length: approximately ${effectiveTargetWordCount} words (±15%)\nHard constraint: Work only on this chapter. Adjacent chapters are continuity references only; never treat them as the writing target.`
-      : `【唯一目标章节】\n章节 ID：${targetChapter.id}\n章节标题：${targetChapter.title}\n章节大纲：${targetOutline?.summary || targetChapter.summary || "未填写"}\n建议字数：约 ${effectiveTargetWordCount} 字（允许上下浮动约 15%）\n硬性要求：只能处理这一章。相邻章节仅供衔接，绝不能把上一章或下一章当成写作目标。`;
-    const task = language.code === "en" ? (body.action === "expand"
-      ? `${language.directive} Expand “${targetChapter.title}” from the supplied outline and story facts. Write this chapter only. The title is stored separately, so do not output a title, chapter number, or “Chapter N”; begin with the first sentence of the narrative. Return only publication-ready prose with no explanation.`
-      : body.action === "continue"
-        ? `${language.directive} Continue from the exact end of the existing prose in “${targetChapter.title}”. Return only new publication-ready continuation paragraphs. Do not repeat, summarize, quote, or rewrite any existing passage. Do not output a title or explanation.`
-      : body.action === "logic"
-        ? `${language.directive} Act as a continuity editor. Return a diagnostic report, not revised prose. Distinguish established evidence, reasonable inference, and missing information; cite relevant passages or events and give concrete repair suggestions.`
-        : `${language.directive} Revise the selected text from “${targetChapter.title}” as requested. Preserve facts, character motivation, and point of view. Return only the complete revised text.`) : body.action === "expand"
-      ? `${language.directive} 根据资料展开《${targetChapter.title}》。只能写这一章。章节标题已由系统单独保存，绝对不要输出标题、章号或“Chapter N”，直接从正文第一句开始。只输出可直接进入正文的文本，不解释过程。`
-      : body.action === "continue"
-        ? `${language.directive} 从《${targetChapter.title}》现有正文最后一句之后继续写作。只输出新增的正文段落，不得重复、概括、引用或改写任何已有文字，不要输出章节标题或解释。`
-      : body.action === "logic"
-        ? `${language.directive} 作为连续性编辑输出检查报告，不要输出改写后的正文。必须区分已有证据、合理推断和资料缺口，引用相关段落或事件，并给出具体修改建议。`
-        : `${language.directive} 作为文字编辑改写《${targetChapter.title}》的指定文本。保持事实、人物动机和视角不变，只输出修改后的完整文本。`;
+    const targetBlock = `${locale.onlyTarget}\n${locale.chapterId}: ${targetChapter.id}\n${locale.chapterTitle}: ${targetChapter.title}\n${locale.chapterOutline}: ${targetOutline?.summary || targetChapter.summary || locale.notProvided}\n${locale.suggestedLength(effectiveTargetWordCount)}\n${locale.hardConstraint}`;
+    const task = `${language.directive}\n${body.action === "expand" ? locale.expand(targetChapter.title) : body.action === "continue" ? locale.continue(targetChapter.title) : body.action === "logic" ? locale.logic : locale.revise(targetChapter.title)}`;
     const selected = body.selection?.trim() || targetChapter.content || "";
-    const prompt = language.code === "en"
-      ? `${targetBlock}\n\n${context}\n\nTEXT TO PROCESS:\n---\n${selected}\n---\n\nUSER REQUEST:\n${effectiveInstruction}`
-      : `${targetBlock}\n\n${context}\n\n待处理文本：\n---\n${selected}\n---\n\n用户要求：${body.instruction}`;
+    const prompt = `${targetBlock}\n\n${context}\n\n${locale.textToProcess}:\n---\n${selected}\n---\n\n${locale.userRequest}:\n${effectiveInstruction}`;
     const result = await generateText(body.settings, task, prompt);
     const { returnedHeading, wrong } = hasWrongChapterHeading(result, targetChapter.title);
     if ((body.action === "expand" || body.action === "continue") && wrong) {

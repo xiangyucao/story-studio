@@ -22,8 +22,25 @@ describe("manual external AI workflow", () => {
       targetChapter: { id: "c3", title: "Chapter 3: The Last Signal", summary: "Mara finds the transmitter.", targetWordCount: 3200 },
     });
     expect(prompt).toContain("ONLY TARGET CHAPTER");
-    expect(prompt).toContain("Write only in English");
+    expect(prompt).toContain("Return only publication-ready prose");
     expect(prompt).not.toMatch(/[\u3400-\u9fff]/);
+  });
+
+  it.each([
+    ["de", "EINZIGES ZIELKAPITEL", "Kapitel 3"],
+    ["es", "ÚNICO CAPÍTULO OBJETIVO", "Capítulo 3"],
+    ["fr", "SEUL CHAPITRE CIBLE", "Chapitre 3"],
+    ["ja", "唯一の対象章", "第三章"],
+    ["pt-BR", "ÚNICO CAPÍTULO-ALVO", "Capítulo 3"],
+    ["it", "UNICO CAPITOLO OBIETTIVO", "Capitolo 3"],
+    ["ko", "유일한 대상 장", "제3장"],
+  ] as const)("builds a localized %s writing prompt", (language, marker, title) => {
+    const prompt = buildManualAiPrompt({
+      action: "expand", context: "Story context", instruction: "Follow the outline.", outputLanguage: language,
+      targetChapter: { id: "c3", title, summary: "Summary", targetWordCount: 3000 },
+    });
+    expect(prompt).toContain(marker);
+    expect(prompt).toContain(title);
   });
 
   it("续写只要求返回新增段落", () => {
@@ -40,8 +57,8 @@ describe("manual external AI workflow", () => {
       action: "logic", context: "Characters and timeline", instruction: "Check continuity.", outputLanguage: "en", selection: "Existing prose",
       targetChapter: { id: "c2", title: "Chapter 2", summary: "A pursuit", targetWordCount: 3000 },
     });
-    expect(prompt).toContain("Return only the English diagnostic report");
-    expect(prompt).toContain("Do not rewrite the chapter");
+    expect(prompt).toContain("Return a diagnostic report, not revised prose");
+    expect(prompt).toContain("concrete repair suggestions");
   });
 
   it("parses structured outline responses inside code fences", () => {

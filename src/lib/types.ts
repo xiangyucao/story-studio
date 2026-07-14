@@ -1,4 +1,4 @@
-export type WritingLanguage = "auto" | "zh-CN" | "zh-TW" | "en";
+export type WritingLanguage = "auto" | "zh-CN" | "zh-TW" | "en" | "de" | "es" | "fr" | "ja" | "pt-BR" | "it" | "ko";
 
 export type Project = {
   id: string;

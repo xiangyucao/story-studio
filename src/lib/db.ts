@@ -177,7 +177,7 @@ function projectFrom(row: Row): Project {
     id: String(row.id), title: String(row.title), genre: String(row.genre),
     premise: String(row.premise), styleGuide: String(row.style_guide),
     referenceTitle: String(row.reference_title || ""), referenceText: String(row.reference_text || ""),
-    writingLanguage: (["auto", "zh-CN", "zh-TW", "en"].includes(String(row.writing_language)) ? String(row.writing_language) : "auto") as Project["writingLanguage"],
+    writingLanguage: (["auto", "zh-CN", "zh-TW", "en", "de", "es", "fr", "ja", "pt-BR", "it", "ko"].includes(String(row.writing_language)) ? String(row.writing_language) : "auto") as Project["writingLanguage"],
     createdAt: String(row.created_at), updatedAt: String(row.updated_at),
   };
 }
@@ -441,7 +441,7 @@ export function mutateWorkspace(action: string, payload: Record<string, unknown>
       return JSON.stringify({ created, updated, changedChapters, clearedChapters });
     }
     case "save-project":
-      db.prepare("UPDATE projects SET title=?, genre=?, premise=?, style_guide=?, reference_title=?, reference_text=?, writing_language=?, updated_at=? WHERE id=?").run(payload.title, payload.genre, payload.premise, payload.styleGuide, payload.referenceTitle ?? "", payload.referenceText ?? "", ["auto", "zh-CN", "zh-TW", "en"].includes(String(payload.writingLanguage)) ? payload.writingLanguage : "auto", timestamp, payload.id);
+      db.prepare("UPDATE projects SET title=?, genre=?, premise=?, style_guide=?, reference_title=?, reference_text=?, writing_language=?, updated_at=? WHERE id=?").run(payload.title, payload.genre, payload.premise, payload.styleGuide, payload.referenceTitle ?? "", payload.referenceText ?? "", ["auto", "zh-CN", "zh-TW", "en", "de", "es", "fr", "ja", "pt-BR", "it", "ko"].includes(String(payload.writingLanguage)) ? payload.writingLanguage : "auto", timestamp, payload.id);
       return payload.id;
     case "delete-project": {
       const projectId = String(payload.id || "");
