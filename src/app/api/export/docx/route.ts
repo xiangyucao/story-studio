@@ -7,6 +7,7 @@ import { dataDir, getIllustrationAsset, getWorkspace } from "@/lib/db";
 import { convertChinese, safeExportName, scriptFrom } from "@/lib/chinese";
 import { groupChaptersByVolume } from "@/lib/manuscript";
 import { stripLeadingChapterHeading } from "@/lib/chapter-target";
+import { filterSelectedExportGroups } from "@/lib/export-selection";
 
 export const runtime = "nodejs";
 
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
       children.push(new TableOfContents(t("目录"), { hyperlink: true, headingStyleRange: "1-3" }));
     }
 
-    const groups = groupChaptersByVolume(workspace).map((group) => ({ ...group, chapters: group.chapters.filter((chapter) => chapter.content.trim() || workspace.illustrations.some((image) => image.chapterId === chapter.id)) })).filter((group) => group.chapters.length);
+    const groups = filterSelectedExportGroups(groupChaptersByVolume(workspace), request.nextUrl.searchParams.get("volumes")).map((group) => ({ ...group, chapters: group.chapters.filter((chapter) => chapter.content.trim() || workspace.illustrations.some((image) => image.chapterId === chapter.id)) })).filter((group) => group.chapters.length);
     for (const group of groups) {
       children.push(new Paragraph({ children: [new PageBreak()] }));
       children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: t(group.volume?.title || "未归档章节"), bold: true })] }));

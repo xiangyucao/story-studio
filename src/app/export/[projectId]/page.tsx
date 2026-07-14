@@ -6,6 +6,7 @@ import { stripLeadingChapterHeading } from "@/lib/chapter-target";
 import { PrintActions } from "./print-button";
 import styles from "./print.module.css";
 import { convertChinese, safeExportName, scriptFrom } from "@/lib/chinese";
+import { filterSelectedExportGroups } from "@/lib/export-selection";
 
 export async function generateMetadata({ params, searchParams }: { params: Promise<{ projectId: string }>; searchParams: Promise<{ script?: string }> }) {
   const { projectId } = await params;
@@ -15,14 +16,15 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
   return { title: safeTitle };
 }
 
-export default async function ExportPage({ params, searchParams }: { params: Promise<{ projectId: string }>; searchParams: Promise<{ script?: string; toc?: string }> }) {
+export default async function ExportPage({ params, searchParams }: { params: Promise<{ projectId: string }>; searchParams: Promise<{ script?: string; toc?: string; volumes?: string }> }) {
   const { projectId } = await params;
   const workspace = getWorkspace(projectId);
   const exportOptions = await searchParams;
   const script = scriptFrom(exportOptions.script);
   const includeToc = exportOptions.toc !== "false";
   const t = (value: string) => convertChinese(value || "", script);
-  const groups = groupChaptersByVolume(workspace).map((group) => ({
+  const volumeNumbers = new Map(workspace.outline.filter((node) => node.type === "volume").map((volume, index) => [volume.id, index + 1]));
+  const groups = filterSelectedExportGroups(groupChaptersByVolume(workspace), exportOptions.volumes).map((group) => ({
     ...group,
     chapters: group.chapters.filter((chapter) => chapter.content.trim() || workspace.illustrations.some((image) => image.chapterId === chapter.id)),
   })).filter((group) => group.chapters.length);
@@ -36,9 +38,9 @@ export default async function ExportPage({ params, searchParams }: { params: Pro
         {workspace.project.premise && <p className={styles.premise}>{t(workspace.project.premise)}</p>}
       </section>
       {includeToc && <section className={styles.toc}><span>CONTENTS</span><h1>{t("目录")}</h1>{groups.map((group) => <div className={styles.tocGroup} key={group.volume?.id || "unfiled-toc"}><strong>{t(group.volume?.title || "未归档章节")}</strong>{group.chapters.map((chapter) => <p key={chapter.id}>{t(chapter.title)}</p>)}</div>)}</section>}
-      {groups.map((group, groupIndex) => <Fragment key={group.volume?.id || "unfiled"}>
+      {groups.map((group) => <Fragment key={group.volume?.id || "unfiled"}>
         <section className={styles.cover}>
-          <span>{group.volume ? `VOLUME ${groupIndex + 1}` : "APPENDIX"}</span>
+          <span>{group.volume ? `VOLUME ${volumeNumbers.get(group.volume.id)}` : "APPENDIX"}</span>
           <h1>{t(group.volume?.title || "未归档章节")}</h1>
           {group.volume?.summary && <p className={styles.premise}>{t(group.volume.summary)}</p>}
         </section>

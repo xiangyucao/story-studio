@@ -3,6 +3,7 @@ import { getWorkspace } from "@/lib/db";
 import { groupChaptersByVolume } from "@/lib/manuscript";
 import { stripLeadingChapterHeading } from "@/lib/chapter-target";
 import { convertChinese, safeExportName, scriptFrom } from "@/lib/chinese";
+import { filterSelectedExportGroups } from "@/lib/export-selection";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,7 @@ export async function GET(request: NextRequest) {
     const script = scriptFrom(request.nextUrl.searchParams.get("script"));
     const includeToc = request.nextUrl.searchParams.get("toc") !== "false";
     const t = (value: string) => convertChinese(value || "", script);
-    const groups = groupChaptersByVolume(workspace).map((group) => ({
+    const groups = filterSelectedExportGroups(groupChaptersByVolume(workspace), request.nextUrl.searchParams.get("volumes")).map((group) => ({
       ...group,
       chapters: group.chapters.filter((chapter) => chapter.content.trim() || workspace.illustrations.some((image) => image.chapterId === chapter.id)),
     })).filter((group) => group.chapters.length);
