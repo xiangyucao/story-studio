@@ -70,7 +70,7 @@ button { cursor: pointer; }
 .app-dialog-fields textarea { min-height: 88px; }
 .app-dialog .modal-button-row { margin-top: 22px; }
 .app-dialog .modal-button-row button { min-width: 110px; justify-content: center; }
-.export-modal { width: min(620px, calc(100vw - 32px)); }
+.export-modal { width: min(620px, calc(100vw - 32px)); max-height: 92vh; overflow-y: auto; }
 .export-language { margin: 14px 0 16px; padding: 14px; background: #f4f0e9; border-radius: 12px; }
 .export-language > span { display: block; margin-bottom: 8px; font-size: 11px; font-weight: 700; }
 .export-language .segmented { display: grid; grid-template-columns: 1fr 1fr; }
@@ -84,10 +84,11 @@ button { cursor: pointer; }
 .export-volume-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
 .export-volume-head > span { font-size: 11px; font-weight: 700; }
 .export-volume-list { display: grid; gap: 6px; max-height: 190px; overflow-y: auto; }
-.export-volume-list label { display: flex; align-items: center; gap: 9px; padding: 8px 9px; background: #f8f4ee; border-radius: 8px; cursor: pointer; }
-.export-volume-list input { width: 16px; height: 16px; accent-color: var(--accent); }
-.export-volume-list span { display: grid; gap: 2px; min-width: 0; }
-.export-volume-list strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.export-volume-list .export-volume-item { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 10px; width: 100%; padding: 10px 11px; background: #f6f1ea; border: 1px solid #ebe2d8; border-radius: 9px; cursor: pointer; }
+.export-volume-list .export-volume-checkbox { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--accent); }
+.export-volume-list .export-volume-copy { display: block; min-width: 0; }
+.export-volume-list .export-volume-title { display: block; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; white-space: normal; }
+.export-volume-list .export-volume-stats { display: block; margin-top: 3px; font-size: 9px; line-height: 1.4; }
 .export-volume-list small, .export-volume-picker > small { color: var(--muted); font-size: 9px; }
 .export-volume-picker > small { display: block; margin-top: 8px; }
 .batch-writing-control > .full { justify-content: center; font-size: 10px; }
