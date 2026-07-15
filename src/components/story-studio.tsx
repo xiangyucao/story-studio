@@ -139,6 +139,7 @@ export function StoryStudio() {
   const timelineImportInputRef = useRef<HTMLInputElement>(null);
   const outlineImportInputRef = useRef<HTMLInputElement>(null);
   const referenceImportInputRef = useRef<HTMLInputElement>(null);
+  const projectBackupImportInputRef = useRef<HTMLInputElement>(null);
   const [settings, setSettings] = useState<ModelSettings>(() => {
     if (typeof window === "undefined") return defaultSettings;
     const saved = localStorage.getItem("story-studio-model-settings");
@@ -918,6 +919,26 @@ export function StoryStudio() {
     setMessage(`大纲导入完成：新增 ${stats.created} 个节点，更新 ${stats.updated} 个节点；${stats.clearedChapters ? `已清空 ${stats.clearedChapters} 章正文` : stats.changedChapters ? `${stats.changedChapters} 章正文已标记为待同步` : "没有已写正文受到影响"}`);
   };
 
+  const importFullProjectBackup = async (file?: File) => {
+    if (!file) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      if (file.size > 300 * 1024 * 1024) throw new Error("完整作品备份不能超过 300 MB");
+      const response = await fetch("/api/project-backup", { method: "POST", headers: { "Content-Type": "application/json" }, body: file });
+      const data = await response.json() as { projectId?: string; title?: string; counts?: { skippedIllustrations?: number }; error?: string };
+      if (!response.ok || !data.projectId) throw new Error(data.error || "完整作品备份导入失败");
+      setExportOpen(false);
+      await loadWorkspace(data.projectId);
+      setMessage(`已从备份创建新作品《${data.title || file.name}》${data.counts?.skippedIllustrations ? `；${data.counts.skippedIllustrations} 张缺失原文件的插画未导入` : "；大纲、正文、设定、历史和插画均已恢复"}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "完整作品备份导入失败");
+    } finally {
+      setBusy(false);
+      if (projectBackupImportInputRef.current) projectBackupImportInputRef.current.value = "";
+    }
+  };
+
   const importReferenceWork = async (file?: File) => {
     if (!file || !projectDraft) return;
     try {
@@ -1115,6 +1136,7 @@ export function StoryStudio() {
       </div>}
       {exportOpen && <div className="modal-backdrop" onMouseDown={() => setExportOpen(false)}>
         <section className="settings-modal export-modal" onMouseDown={(event) => event.stopPropagation()}>
+          <input ref={projectBackupImportInputRef} className="visually-hidden" type="file" accept="application/json,.json" onChange={(event) => void importFullProjectBackup(event.target.files?.[0])} />
           <div className="modal-head"><div><span className="eyebrow">EXPORT</span><h2>{ui.export} · {workspace.project.title}</h2></div><button className="icon-button" onClick={() => setExportOpen(false)}><X size={19} /></button></div>
           <div className="export-language"><span>{ui.outputText}</span><div className="segmented"><button className={exportScript === "simplified" ? "active" : ""} onClick={() => setExportScript("simplified")}>简体中文</button><button className={exportScript === "traditional" ? "active" : ""} onClick={() => setExportScript("traditional")}>繁體中文</button></div><small>只转换导出文件，数据库中的原文不会改变。</small></div>
           <div className="export-volume-picker">
@@ -1127,6 +1149,8 @@ export function StoryStudio() {
             <button disabled={!selectedExportVolumes.size} onClick={() => { window.open(`/export/${workspace.project.id}?script=${exportScript}&toc=${exportIncludeToc}&volumes=${exportVolumesParam}`, "_blank", "noopener,noreferrer"); setExportOpen(false); }}><span className="export-icon"><Printer size={22} /></span><div><strong>PDF / 打印稿</strong><small>A4 专业排版，包含章节插画；在打印窗口选择“另存为 PDF”。</small></div><ChevronRight size={17} /></button>
             <a className={!selectedExportVolumes.size ? "disabled" : ""} aria-disabled={!selectedExportVolumes.size} href={selectedExportVolumes.size ? `/api/export/docx?projectId=${workspace.project.id}&script=${exportScript}&toc=${exportIncludeToc}&volumes=${exportVolumesParam}` : undefined} onClick={() => selectedExportVolumes.size && setExportOpen(false)}><span className="export-icon"><FileText size={22} /></span><div><strong>Word 文档 (.docx)</strong><small>包含封面、卷章层级、正文以及支持的章节插画。</small></div><ChevronRight size={17} /></a>
             <a className={!selectedExportVolumes.size ? "disabled" : ""} aria-disabled={!selectedExportVolumes.size} href={selectedExportVolumes.size ? `/api/export/markdown?projectId=${workspace.project.id}&script=${exportScript}&toc=${exportIncludeToc}&volumes=${exportVolumesParam}` : undefined} onClick={() => selectedExportVolumes.size && setExportOpen(false)}><span className="export-icon"><FileType2 size={22} /></span><div><strong>Markdown 原稿</strong><small>适合备份、版本管理以及导入其他写作工具。</small></div><ChevronRight size={17} /></a>
+            <a href={`/api/project-backup?projectId=${workspace.project.id}`} onClick={() => setExportOpen(false)}><span className="export-icon"><Upload size={22} /></span><div><strong>导出完整作品备份 (.json)</strong><small>包含作品基石、大纲、全部正文、人物关系、世界观、时间线、版本记录和插画文件。</small></div><ChevronRight size={17} /></a>
+            <button disabled={busy} onClick={() => projectBackupImportInputRef.current?.click()}><span className="export-icon">{busy ? <LoaderCircle className="spin" size={22} /> : <Download size={22} />}</span><div><strong>导入完整作品备份 (.json)</strong><small>创建一个全新的独立作品，重新生成内部 ID，不覆盖当前作品。</small></div><ChevronRight size={17} /></button>
           </div>
           <div className="security-note">{ui.selected} {selectedExportVolumes.size} / {exportVolumeGroups.length} {ui.volumes}。导出文件使用作品名；繁体转换基于 OpenCC，只影响本次导出。</div>
         </section>

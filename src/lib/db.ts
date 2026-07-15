@@ -19,6 +19,7 @@ import { normalizeCharacterImportData, normalizeCharacterName } from "./characte
 import { normalizeWorldImportData } from "./world-import";
 import { normalizeTimelineImportData } from "./timeline-import";
 import { parseOutlineJson, type OutlineJsonNode } from "./outline-json";
+import { parseProjectBackup, projectBackupFormat, projectBackupVersion, type ProjectBackup } from "./project-backup";
 
 const dataDir = process.env.STORY_STUDIO_DATA_DIR
   ? path.resolve(process.env.STORY_STUDIO_DATA_DIR)
@@ -385,6 +386,159 @@ export function repairLegacyVolumeStructure() {
 
 export function getIllustrationAsset(illustrationId: string) {
   return db.prepare("SELECT stored_name, file_name, mime_type FROM illustrations WHERE id=?").get(illustrationId) as { stored_name: string; file_name: string; mime_type: string } | undefined;
+}
+
+export function createProjectBackup(projectId: string): ProjectBackup {
+  const exactProject = db.prepare("SELECT id FROM projects WHERE id=?").get(projectId) as { id: string } | undefined;
+  if (!exactProject) throw new Error("要备份的作品不存在");
+  const workspace = getWorkspace(projectId);
+  const revisionRows = db.prepare("SELECT * FROM revisions WHERE project_id=? ORDER BY created_at, rowid").all(projectId) as Row[];
+  const illustrationRows = db.prepare("SELECT * FROM illustrations WHERE project_id=? ORDER BY chapter_id, position, created_at").all(projectId) as Row[];
+  const uploadDir = path.join(dataDir, "uploads");
+  return {
+    format: projectBackupFormat,
+    version: projectBackupVersion,
+    exportedAt: now(),
+    project: {
+      sourceId: workspace.project.id, title: workspace.project.title, genre: workspace.project.genre,
+      premise: workspace.project.premise, styleGuide: workspace.project.styleGuide,
+      referenceTitle: workspace.project.referenceTitle, referenceText: workspace.project.referenceText,
+      writingLanguage: workspace.project.writingLanguage || "auto", createdAt: workspace.project.createdAt,
+      updatedAt: workspace.project.updatedAt,
+    },
+    outline: workspace.outline.map((item) => ({
+      sourceId: item.id, sourceParentId: item.parentId, type: item.type, title: item.title, summary: item.summary,
+      position: item.position, status: item.status, revision: item.revision,
+    })),
+    chapters: workspace.chapters.map((item) => ({
+      sourceId: item.id, sourceOutlineNodeId: item.outlineNodeId, title: item.title, content: item.content,
+      summary: item.summary, status: item.status, position: item.position, wordCount: item.wordCount,
+      targetWordCount: item.targetWordCount, outlineStale: item.outlineStale,
+      basedOnOutlineRevision: item.basedOnOutlineRevision, updatedAt: item.updatedAt,
+    })),
+    characters: workspace.characters.map((item) => ({
+      sourceId: item.id, name: item.name, role: item.role, description: item.description, goal: item.goal,
+      fear: item.fear, secret: item.secret, voice: item.voice, status: item.status,
+    })),
+    relationships: workspace.relationships.map((item) => ({
+      sourceId: item.id, sourceCharacterId: item.sourceCharacterId, targetCharacterId: item.targetCharacterId,
+      sourceName: item.sourceName, targetName: item.targetName, type: item.type, description: item.description,
+    })),
+    worldEntries: workspace.worldEntries.map((item) => ({
+      sourceId: item.id, category: item.category, name: item.name, description: item.description, isCanon: item.isCanon,
+    })),
+    events: workspace.events.map((item) => ({
+      sourceId: item.id, sourceChapterId: item.chapterId, chapterTitle: item.chapterTitle, title: item.title,
+      storyTime: item.storyTime, description: item.description, causes: item.causes, consequences: item.consequences,
+    })),
+    revisions: revisionRows.map((row) => ({
+      sourceId: String(row.id), entityType: String(row.entity_type), sourceEntityId: String(row.entity_id),
+      beforeContent: String(row.before_content), afterContent: String(row.after_content),
+      instruction: String(row.instruction), createdAt: String(row.created_at),
+    })),
+    illustrations: illustrationRows.map((row) => {
+      const storedName = String(row.stored_name);
+      let dataBase64: string | null = null;
+      if (path.basename(storedName) === storedName) {
+        try { dataBase64 = fs.readFileSync(path.join(uploadDir, storedName)).toString("base64"); } catch { /* 缺失文件保留元数据并在导入时跳过。 */ }
+      }
+      return {
+        sourceId: String(row.id), sourceChapterId: String(row.chapter_id), fileName: String(row.file_name),
+        mimeType: String(row.mime_type), caption: String(row.caption), position: Number(row.position),
+        createdAt: String(row.created_at), dataBase64,
+      };
+    }),
+  };
+}
+
+export function importProjectBackup(input: string | unknown) {
+  const backup = parseProjectBackup(input);
+  const projectId = id();
+  const outlineIds = new Map(backup.outline.map((item) => [item.sourceId, id()]));
+  const chapterIds = new Map(backup.chapters.map((item) => [item.sourceId, id()]));
+  const characterIds = new Map(backup.characters.map((item) => [item.sourceId, id()]));
+  const relationshipIds = new Map(backup.relationships.map((item) => [item.sourceId, id()]));
+  const worldIds = new Map(backup.worldEntries.map((item) => [item.sourceId, id()]));
+  const eventIds = new Map(backup.events.map((item) => [item.sourceId, id()]));
+  const revisionIds = new Map(backup.revisions.map((item) => [item.sourceId, id()]));
+  const illustrationIds = new Map(backup.illustrations.map((item) => [item.sourceId, id()]));
+  const entityIds = new Map<string, string>([
+    ...outlineIds, ...chapterIds, ...characterIds, ...relationshipIds, ...worldIds, ...eventIds, ...illustrationIds,
+  ]);
+  const uploadDir = path.join(dataDir, "uploads");
+  fs.mkdirSync(uploadDir, { recursive: true });
+  const extensions: Record<string, string> = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp" };
+  const createdFiles: string[] = [];
+  const storedNames = new Map<string, string>();
+  let skippedIllustrations = 0;
+
+  try {
+    for (const illustration of backup.illustrations) {
+      if (!illustration.dataBase64) { skippedIllustrations += 1; continue; }
+      const extension = extensions[illustration.mimeType];
+      if (!extension) throw new Error(`不支持的插画格式：${illustration.mimeType}`);
+      const bytes = Buffer.from(illustration.dataBase64, "base64");
+      if (bytes.length > 100 * 1024 * 1024) throw new Error(`插画文件过大：${illustration.fileName}`);
+      const storedName = `${id()}${extension}`;
+      const filePath = path.join(uploadDir, storedName);
+      fs.writeFileSync(filePath, bytes, { flag: "wx" });
+      createdFiles.push(filePath);
+      storedNames.set(illustration.sourceId, storedName);
+    }
+
+    db.transaction(() => {
+      const p = backup.project;
+      db.prepare("INSERT INTO projects (id, title, genre, premise, style_guide, reference_title, reference_text, writing_language, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+        projectId, p.title, p.genre, p.premise, p.styleGuide, p.referenceTitle, p.referenceText,
+        p.writingLanguage, p.createdAt || now(), p.updatedAt || now(),
+      );
+
+      const addOutline = db.prepare("INSERT INTO outline_nodes (id, project_id, parent_id, type, title, summary, position, status, revision) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)");
+      backup.outline.forEach((item) => addOutline.run(outlineIds.get(item.sourceId), projectId, item.type, item.title, item.summary, item.position, item.status, item.revision));
+      const setOutlineParent = db.prepare("UPDATE outline_nodes SET parent_id=? WHERE id=?");
+      backup.outline.forEach((item) => {
+        if (item.sourceParentId) setOutlineParent.run(outlineIds.get(item.sourceParentId), outlineIds.get(item.sourceId));
+      });
+
+      const addChapter = db.prepare("INSERT INTO chapters (id, project_id, outline_node_id, title, content, summary, status, position, word_count, target_word_count, outline_stale, based_on_outline_revision, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      backup.chapters.forEach((item) => addChapter.run(
+        chapterIds.get(item.sourceId), projectId, item.sourceOutlineNodeId ? outlineIds.get(item.sourceOutlineNodeId) : null,
+        item.title, item.content, item.summary, item.status, item.position, item.wordCount, item.targetWordCount,
+        item.outlineStale ? 1 : 0, item.basedOnOutlineRevision, item.updatedAt,
+      ));
+
+      const addCharacter = db.prepare("INSERT INTO characters (id, project_id, name, role, description, goal, fear, secret, voice, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      backup.characters.forEach((item) => addCharacter.run(characterIds.get(item.sourceId), projectId, item.name, item.role, item.description, item.goal, item.fear, item.secret, item.voice, item.status));
+      const addRelationship = db.prepare("INSERT INTO relationships (id, project_id, source_character_id, target_character_id, type, description) VALUES (?, ?, ?, ?, ?, ?)");
+      backup.relationships.forEach((item) => addRelationship.run(relationshipIds.get(item.sourceId), projectId, characterIds.get(item.sourceCharacterId), characterIds.get(item.targetCharacterId), item.type, item.description));
+      const addWorld = db.prepare("INSERT INTO world_entries (id, project_id, category, name, description, is_canon) VALUES (?, ?, ?, ?, ?, ?)");
+      backup.worldEntries.forEach((item) => addWorld.run(worldIds.get(item.sourceId), projectId, item.category, item.name, item.description, item.isCanon ? 1 : 0));
+      const addEvent = db.prepare("INSERT INTO story_events (id, project_id, chapter_id, title, story_time, description, causes, consequences) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+      backup.events.forEach((item) => addEvent.run(eventIds.get(item.sourceId), projectId, item.sourceChapterId ? chapterIds.get(item.sourceChapterId) : null, item.title, item.storyTime, item.description, item.causes, item.consequences));
+      const addRevision = db.prepare("INSERT INTO revisions (id, project_id, entity_type, entity_id, before_content, after_content, instruction, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+      backup.revisions.forEach((item) => addRevision.run(revisionIds.get(item.sourceId), projectId, item.entityType, entityIds.get(item.sourceEntityId) || item.sourceEntityId, item.beforeContent, item.afterContent, item.instruction, item.createdAt));
+      const addIllustration = db.prepare("INSERT INTO illustrations (id, project_id, chapter_id, file_name, stored_name, mime_type, caption, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      backup.illustrations.forEach((item) => {
+        const storedName = storedNames.get(item.sourceId);
+        if (!storedName) return;
+        addIllustration.run(illustrationIds.get(item.sourceId), projectId, chapterIds.get(item.sourceChapterId), item.fileName, storedName, item.mimeType, item.caption, item.position, item.createdAt);
+      });
+    })();
+  } catch (error) {
+    createdFiles.forEach((filePath) => { try { fs.unlinkSync(filePath); } catch { /* ignore cleanup failure */ } });
+    throw error;
+  }
+
+  return {
+    projectId,
+    title: backup.project.title,
+    counts: {
+      outline: backup.outline.length, chapters: backup.chapters.length, characters: backup.characters.length,
+      relationships: backup.relationships.length, worldEntries: backup.worldEntries.length, events: backup.events.length,
+      revisions: backup.revisions.length, illustrations: backup.illustrations.length - skippedIllustrations,
+      skippedIllustrations,
+    },
+  };
 }
 
 export function mutateWorkspace(action: string, payload: Record<string, unknown>) {
